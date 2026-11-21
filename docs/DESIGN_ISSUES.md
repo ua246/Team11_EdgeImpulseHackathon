@@ -27,6 +27,7 @@ pitch and the Q&A. IDs are never reused; gaps are entries removed with DI-22.
 | [DI-19](#di-19-our-board-runs-app-lab-07--zephyr-core-052) | Our board runs App Lab 0.7 / Zephyr core 0.52 | Tooling | High | Mitigated |
 | [DI-20](#di-20-sketch-upload-to-the-mcu-fails) | Sketch upload to the MCU fails | Firmware | High | Mitigated |
 | [DI-22](#di-22-decision-the-modulino-light-is-the-only-light-sensor) | Decision: the Modulino Light is the only light sensor | Sensing | High | Resolved |
+| [DI-23](#di-23-running-the-edge-impulse-model-offline-on-the-uno-q) | Running the Edge Impulse model offline on the UNO Q | ML | High | Open |
 
 ---
 
@@ -358,6 +359,57 @@ commit `65e6c7f`.
 
 **Next step.** Characterise the Modulino Light with `apps/light-test` (rig: `hardware/light-test`)
 and use the measured usable band in the pitch and the light model.
+
+---
+
+## DI-23 Running the Edge Impulse model offline on the UNO Q
+**Status:** Open (training pending) · **Severity:** High · **Logged:** 2026-11-21
+
+**Decision: run the model on the Linux side, through an App Lab brick.**
+- The board is offline, so nothing can be downloaded or installed (`edge-impulse-linux` needs
+  internet).
+- The board already has Arduino's `ei-models-runner:0.5.0` image (Edge Impulse's Linux runner).
+  The `arduino:motion_detection` brick starts it with any `.eim` model, chosen through a brick
+  variable in `app.yaml`:
+  ```yaml
+  bricks:
+    - arduino:motion_detection:
+        variables:
+          EI_MOTION_DETECTION_MODEL: /home/arduino/.arduino-bricks/ei-models/flicker-guard.eim
+  ```
+- **Verified on the board:**
+  - the runner loads a model from that path and serves it over HTTP on port 1337;
+  - `MotionDetection(...).infer_from_features(list)` returns
+    `{"result": {"classification": {label: 0..1}}}`;
+  - the brick's own `_extract_classification()` gives percentage *strings*, so `apps/flicker-guard`
+    parses the raw result instead.
+- **Rejected for now: the MCU (Zephyr module).** Edge Impulse calls UNO Q support there
+  "experimental"; it needs `west` and debugger flashing.
+- Edge Impulse lists a deployment target named **"Arduino UNO Q"** (`arduino-uno-q`), plus
+  "Linux (AARCH64)" (`runner-linux-aarch64`).
+
+**Model input** (`apps/flicker-guard/python/features.py`, shared with the training tools):
+- **Window:** 64 readings (about 1.77 s at 36 readings/s).
+- **Preprocessing:** divide by the sensor gain, take the log (so brightness and distance become an
+  offset), subtract the window mean.
+- **Inference:** every 0.5 s on overlapping windows. The brick's own buffer uses non-overlapping
+  windows, which would give a slower alert.
+
+**Training data so far:** one ~7 min Collect session from the laptop screen (`tools/ei`).
+- **Room light swamped the screen.** Flicker changed the total light by only 5–30%, so 32 windows too
+  faint to count were dropped.
+- **Uploaded:** 510 windows to project 1170128 (409 training, 101 test, split by segment).
+
+**Problems:**
+- **The API key in use has the `ingestion_deployment` role.** It can upload and download models, but
+  can't create the impulse or train. Training needs an Admin key, or the Studio UI.
+- **One window was uploaded twice** (a test upload; `x-disallow-duplicates` didn't catch it because
+  Edge Impulse renames files). It's harmless; delete it with an Admin key.
+- **Screen-only training data.** Real LED strobes, room-light changes and other screens should be
+  added (Collect in a darker room with the sensor closer, plus real-world negatives).
+
+**Next step:** train, deploy the `.eim`, then measure on the board: accuracy on the flicker page,
+false alerts in room light, and time from onset to alert (T4). Plan: `docs/BRIEF.md`.
 
 ---
 

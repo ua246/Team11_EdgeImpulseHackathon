@@ -15,6 +15,7 @@
   button.on { border-color: var(--fg); }
   p.small { color: var(--muted); font-size: 14px; }
   #flash { position: fixed; inset: 0; display: none; background: #000; }
+  #msg { position: absolute; top: 40%; width: 100%; text-align: center; font: 28px system-ui, sans-serif; color: #888; }
   #hud { position: fixed; left: 12px; bottom: 10px; font: 14px monospace; color: #888; mix-blend-mode: difference; display: none; }
 </style>
 </head>
@@ -36,13 +37,18 @@
     1–30 Hz for 6 s each with black gaps. Hold the sensor 2–5 cm from the middle of the screen, facing it,
     with the screen at full brightness. Analyse afterwards with <code>screen_sweep.py</code>.</p>
   <div class="row"><button id="sweep">Sweep (automatic)</button></div>
+  <p>Training data for the Edge Impulse model (<code>apps/flicker-guard</code>, about 7 min): a sync block,
+    then 48 labelled 7 s segments (flicker at 3–30 Hz in several colours and contrasts; steady light, slow
+    blinks, fades and level steps), then 60 s of room light. Prop the sensor 2–5 cm from the middle of the
+    screen; when the screen says so, point it around the room instead. Then run
+    <code>tools/ei/make_dataset.py</code>.</p>
+  <div class="row"><button id="collect">Collect (training data)</button></div>
   <p class="small">The screen refreshes about 60 times a second, so it can only show square waves up to
-    30 Hz; rates that don't divide 60 evenly have slightly uneven flashes, but the average rate is exact.
-    Use with the light test and sensor-stream (live readout) and for Edge Impulse data collection
-    (<code>tools/unoq record flicker_18hz 30</code> while it runs).</p>
+    30 Hz; rates that don't divide 60 evenly have slightly uneven flashes, but the average rate is exact.</p>
 </div>
-<div id="flash"></div>
+<div id="flash"><div id="msg"></div></div>
 <div id="hud"></div>
+<script src="collect-schedule.js"></script>
 <script>
   const RATES = [1, 2, 3, 5, 8, 10, 12, 15, 18, 20, 25, 30];
   // Keep in sync with apps/light-test/python/screen_sweep.py.
@@ -51,9 +57,8 @@
   SWEEP_RATES.forEach((r, i) => SWEEP.push({k: "flicker", r, d: 6, l: `${r} Hz (${i + 1}/${SWEEP_RATES.length})`},
                                            {k: "black", d: 1.5, l: "gap"}));
   SWEEP.push({k: "white", d: 3, l: "end"}, {k: "black", d: 2, l: "end"});
-  const SWEEP_S = SWEEP.reduce((a, e) => a + e.d, 0);
-  const flash = document.getElementById("flash"), hud = document.getElementById("hud");
-  let colour = "#ffffff", rate = 0, t0 = 0, raf = 0, sweeping = false;
+  const flash = document.getElementById("flash"), hud = document.getElementById("hud"), msg = document.getElementById("msg");
+  let colour = "#ffffff", rate = 0, t0 = 0, raf = 0, timeline = null, mode = "";
 
   for (const r of RATES) {
     const b = document.createElement("button");
@@ -67,37 +72,63 @@
     colour = b.dataset.c;
   });
 
+  const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const mix = (a, b, f) => { const x = rgb(a), y = rgb(b); return `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * f)).join(",")})`; };
+  const sq = (t, r) => (t * r) % 1 < 0.5;
+
+  // Colour of one timeline entry, t seconds after it started.
+  function render(e, t) {
+    const on = e.on || colour, off = e.off || "#000000";
+    switch (e.k) {
+      case "white": return colour;
+      case "flicker": case "blink": return sq(t, e.r) ? on : off;
+      case "steady": return on;
+      case "fade": return mix(off, on, 0.5 - 0.5 * Math.cos(2 * Math.PI * e.r * t));
+      case "steps": { let c = e.levels[0]; e.times.forEach((x, i) => { if (t >= x) c = e.levels[i]; }); return c; }
+      default: return "#000000";   // black, room
+    }
+  }
+
   function frame(now) {
     // Frames arrive every ~16.7 ms with a little jitter, and for rates that divide 60 every on/off
     // boundary falls exactly on a frame. Looking a quarter-frame ahead keeps each frame's decision
     // clear of the boundary, so e.g. 30 Hz alternates frames strictly instead of stuttering.
     const el = (now - t0) / 1000 + 1 / 240;
-    let on;
-    if (sweeping) {
-      let start = 0, e = null;
-      for (const x of SWEEP) { if (el < start + x.d) { e = x; break; } start += x.d; }
+    if (timeline) {
+      let start = 0, e = null, total = timeline.reduce((a, x) => a + x.d, 0);
+      for (const x of timeline) { if (el < start + x.d) { e = x; break; } start += x.d; }
       if (!e) { stop(); return; }
-      on = e.k === "white" || (e.k === "flicker" && ((el - start) * e.r) % 1 < 0.5);
-      hud.textContent = `Sweep · ${e.k === "flicker" ? e.l : e.l + " (" + e.k + ")"} · ${Math.ceil(SWEEP_S - el)} s left · Esc to stop`;
+      flash.style.background = render(e, el - start);
+      const left = Math.ceil(total - el);
+      if (e.k === "room") {
+        msg.textContent = `Point the sensor around the room, away from this screen (${Math.ceil(start + e.d - el)} s)`;
+      } else {
+        msg.textContent = "";
+      }
+      const what = mode === "sweep" ? (e.l || e.k) : (e.n ? `segment ${e.n}/48 · ${e.label}` : (e.label || e.k));
+      hud.textContent = `${mode === "sweep" ? "Sweep" : "Collect"} · ${what} · ${left} s left · Esc to stop`;
     } else {
-      on = (el * rate) % 1 < 0.5;
+      flash.style.background = sq(el, rate) ? colour : "#000";
     }
-    flash.style.background = on ? colour : "#000";
     raf = requestAnimationFrame(frame);
   }
-  function start(r, sweep = false) {
-    rate = r; sweeping = sweep; t0 = performance.now();
+  function start(r, tl = null, m = "") {
+    rate = r; timeline = tl; mode = m; t0 = performance.now();
     flash.style.display = "block"; hud.style.display = "block";
-    hud.textContent = r + " Hz · Esc or click to stop";
+    hud.textContent = tl ? "starting…" : r + " Hz · Esc or click to stop";
     try { document.documentElement.requestFullscreen(); } catch (e) {}
     raf = requestAnimationFrame(frame);
   }
   function stop() {
-    cancelAnimationFrame(raf); rate = 0; sweeping = false;
+    cancelAnimationFrame(raf); rate = 0; timeline = null; msg.textContent = "";
     flash.style.display = "none"; hud.style.display = "none";
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   }
-  document.getElementById("sweep").onclick = () => start(-1, true);
+  document.getElementById("sweep").onclick = () => start(-1, SWEEP, "sweep");
+  document.getElementById("collect").onclick = () => {
+    if (typeof COLLECT === "undefined") { alert("collect-schedule.js is missing: run python3 tools/ei/collect_schedule.py"); return; }
+    start(-1, COLLECT, "collect");
+  };
   flash.onclick = stop;
   document.addEventListener("keydown", e => { if (e.key === "Escape") stop(); });
   document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && rate) stop(); });

@@ -93,9 +93,11 @@ apps/sensor-stream/        App Lab app: comms test + data recorder (copy it to s
   python/main.py           Linux side: receives data, prints status, records CSVs
   sketch/sketch.ino        MCU side: reads sensors, sends batches over the Bridge
   sketch/sketch.yaml       sketch libraries (Arduino_Modulino 0.7.0, as in Arduino's own examples)
-apps/light-test/           automated test: how well does the Modulino Light read flicker? (test LED sweep)
+apps/light-test/           automated test: how well does the Modulino Light read flicker? (LED sweep + screen sweep)
+apps/flicker-guard/        Edge Impulse flicker check on the board (runner brick, custom .eim) + training recorder
+tools/ei/                  Edge Impulse pipeline: Collect schedule, labelled windows, upload (train/deploy to do)
 hardware/light-test/       KiCad schematic + PDF + parts list for the light test rig
-tools/flicker.html         flicker test page (1-30 Hz, white/red/blue) for manual checks and data collection
+tools/flicker.html         flicker test page: manual rates, automatic sweep (light-test), Collect (training data)
 tools/unoq                 command-line helper (adb or SSH)
 tools/pretty.py            timestamps, colours and log files for board output
 tools/stubs/               editor-only stubs for arduino.app_utils

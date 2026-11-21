@@ -8,6 +8,8 @@
 
 `apps/sensor-stream` streams the Modulino Light and Modulino Movement, prints live rates and values, and records labelled CSVs for Edge Impulse (`tools/unoq record <label> <seconds>`).
 
-`apps/light-test` measures how well the Modulino Light reads flicker, using a test LED (rig: `hardware/light-test`): `UNOQ_APP=light-test tools/unoq dev`.
+`apps/light-test` measures how well the Modulino Light reads flicker, using a test LED (rig: `hardware/light-test`) or the laptop screen: `UNOQ_APP=light-test tools/unoq dev`.
+
+`apps/flicker-guard` runs an Edge Impulse model on the board to check for fast flickering light; `tools/ei` builds its training data. Status and next steps: [docs/BRIEF.md](docs/BRIEF.md).
 
 Full guide: [docs/UNOQ_DEV.md](docs/UNOQ_DEV.md)
