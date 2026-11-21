@@ -98,6 +98,7 @@ apps/sensor-stream/        App Lab app: comms test + data recorder (copy it to s
   sketch/sketch.ino        MCU side: reads sensors, sends batches over the Bridge
   sketch/sketch.yaml       sketch libraries (Arduino_Modulino 0.7.0, as in Arduino's own examples)
 apps/detector-test/        automated test: is the heart beat module fast enough for flicker? (PASS/PARTIAL/FAIL)
+apps/camera-test/          automated test of the Arduino USB Camera (fps, exposure, flicker limits) + live readout
 hardware/detector-test/    KiCad schematic + PDF + parts list for the detector test rig
 tools/unoq                 command-line helper (adb or SSH)
 tools/pretty.py            timestamps, colours and log files for board output

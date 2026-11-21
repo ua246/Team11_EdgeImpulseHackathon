@@ -311,6 +311,10 @@ to about 20% strength.
 Process 320×240 YUY2 frames into a coarse brightness grid; never store images. Mount it in the
 chest holder (too heavy for a cap), and keep its ring light **off**.
 
+**Test:** `apps/camera-test` measures all of this on the real hardware: real fps, whether exposure
+locks, frequency limit and blind spots (using the detector-rig LED), and share of view flashing.
+After the test it gives a live readout for real sources.
+
 **Question.** Could a camera (the team has a Raspberry Pi camera / Pi 5) detect flashing light
 instead of the Modulino Light?
 

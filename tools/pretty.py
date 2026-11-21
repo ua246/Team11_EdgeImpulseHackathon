@@ -25,7 +25,7 @@ RULES = [  # first match wins
     (re.compile(r"Traceback|\bError\b|\bERROR\b|Exception|\bfailed\b|\bFAILED\b|✗"), "31"),
     (re.compile(r"\bWARN(ING)?\b|\[warn\]|\bWarning\b"), "33"),
     (re.compile(r"\[rec\]"), "35"),
-    (re.compile(r"^\[stat\]"), "1"),
+    (re.compile(r"^\[(stat|cam)\]"), "1"),
     (re.compile(r"^\[(mcu|boot)\]|connected|\bOK\b"), "32"),
 ]
 
