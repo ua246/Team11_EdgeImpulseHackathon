@@ -112,7 +112,7 @@
 | Part | Placement | Connection | Rate | Role |
 |---|---|---|---|---|
 | Arduino UNO Q | Arm sleeve or chest holder | Power bank (USB-C) | – | Sampling (MCU), models and logic (Linux) |
-| Modulino Light (LTR-381RGB, I2C 0x53) | Cap brim, facing forward, in a short black tube | Qwiic (`Wire1`) | ≤ 40/s (25 ms each) | **The flicker sensor:** brightness swing, flicker frequency (correct up to about 15 Hz, folded above 20 Hz), colour (red share) |
+| Modulino Light (LTR-381RGB, I2C 0x53) | Cap brim, facing forward, in a short black tube | Qwiic (`Wire1`) | ≈ 36/s measured (nominal 40) | **The flicker sensor:** brightness swing, flicker frequency (correct 1–15 Hz measured, folded above about 18 Hz), colour (red share) |
 | Modulino Movement (LSM6DSOX) | Wrist / forearm (sleeve) | Qwiic | 50/s | Seizure-like motion |
 | Modulino Vibro | Sternum (chest strap) or temple | Qwiic | – | Silent wearer alert |
 | Modulino Buzzer | Board / sleeve | Qwiic | – | Carer alarm |
@@ -184,7 +184,7 @@ for the Edge Impulse CSV Wizard. The label comes from the file-name prefix.
 
 | Test | What | Pass |
 |---|---|---|
-| T1 | `apps/light-test`: test LED at 1–35 Hz and short flashes into the Modulino Light; checks the 40 readings/s + 25 ms averaging model | **PASS** on "10 Hz flicker"; measured correct-frequency band (expected about 1–15 Hz) goes into the pitch |
+| T1 | `apps/light-test`: test LED (1–35 Hz, short flashes) or the laptop screen (`tools/flicker.html` → Sweep, 1–30 Hz) into the Modulino Light; checks the reading-rate + averaging model | **PASS** on "10 Hz flicker". Screen sweep 2026-11-21: **PASS**, correct 1–15 Hz, 20/30 Hz fold as predicted; LED rig still to run |
 | T2 | Model A on held-out data; flicker page at 5/10/15 Hz, plus 25 Hz (folded, must still alert); harmless set; distance 0.5–3 m in dim and lit rooms | F1, F3, N4 |
 | T3 | Model B on a held-out person; hard negatives; 30-minute normal wear | F4, N5 |
 | T4 | Latency: flicker onset → vibration (log timestamps or slow-motion phone video) | N2 |
@@ -245,7 +245,7 @@ Full log: `docs/DESIGN_ISSUES.md` on
 
 | Risk | Mitigation |
 |---|---|
-| Modulino Light tops out at 40/s: frequencies above about 18 Hz read wrong, and part of the 16–25 Hz peak band folds (DI-01) | Accepted (DI-22). T1 measures the real band; Model A is trained on the folded signal so it still alerts; the pitch states the limit |
+| Modulino Light takes only about 36 readings/s (measured): frequencies above about 18 Hz read wrong, and part of the 16–25 Hz peak band folds; mains ripple folds to about 8.6 Hz (DI-01) | Accepted (DI-22). Measured band 1–15 Hz (T1) goes in the pitch; Model A is trained on the folded signal so it still alerts; a minimum brightness swing rejects mains ripple |
 | No real seizure data (DI-09) | Hard negatives, cancel button, honest framing, false-alarm measurement |
 | Two models in about 10 h | Model A is MVP; Model B is "Should"; fall back to light-only FlickerGuard (§15) |
 | Demo hardware failure | Strain relief, spare cables, backup video |
