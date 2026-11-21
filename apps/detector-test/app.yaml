@@ -1,0 +1,3 @@
+name: Detector Test
+icon: 🔦
+description: "Team 11: checks whether the heart beat module can measure flicker. Flashes a test LED at known rates into the module and grades what it sees (PASS / PARTIAL / FAIL)."

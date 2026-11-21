@@ -1,0 +1,11 @@
+{
+  // All available on Open VSX, so they install in VSCodium.
+  "recommendations": [
+    "llvm-vs-code-extensions.vscode-clangd",
+    "ms-python.python",
+    "redhat.vscode-yaml",
+    "timonwong.shellcheck",
+    "usernamehw.errorlens",
+    "jeanp413.open-remote-ssh"
+  ]
+}

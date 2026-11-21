@@ -1,0 +1,3 @@
+name: Sensor Stream
+icon: 📈
+description: "Team 11 comms test: streams the Modulino Light, Modulino Movement and heart beat sensor to Python, prints live rates and values, and records labelled CSVs for Edge Impulse."

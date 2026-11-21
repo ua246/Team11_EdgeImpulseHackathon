@@ -1,0 +1,20 @@
+# Local build output (tools/unoq compile) and output logs (tools/pretty.py)
+build/
+logs/
+
+# Recorded sensor data: upload to Edge Impulse rather than committing it
+recordings/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Generated on the board by App Lab
+apps/*/.cache/
+apps/*/data/
+
+# KiCad per-user and generated files
+*.kicad_prl
+*-backups/
+fp-info-cache

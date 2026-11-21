@@ -1,0 +1,125 @@
+{
+  // UNO Q tasks. Ctrl+Shift+B = push + restart + watch Python and MCU output side by side.
+  // Run any other task with Ctrl+Shift+P → "Tasks: Run Task" → "UNO Q: …".
+  // App and link come from .vscode/settings.json ("unoq.app", "unoq.host").
+  "version": "2.0.0",
+  "options": {
+    "env": {
+      "UNOQ_APP": "${config:unoq.app}",
+      "UNOQ_HOST": "${config:unoq.host}"
+    }
+  },
+  "tasks": [
+    {
+      "label": "UNO Q: dev (push → restart → watch)",
+      "dependsOrder": "sequence",
+      "dependsOn": ["UNO Q: push", "UNO Q: restart", "UNO Q: watch (Python + MCU)"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "UNO Q: watch (Python + MCU)",
+      "dependsOrder": "parallel",
+      "dependsOn": ["UNO Q: Python logs", "UNO Q: MCU monitor"],
+      "problemMatcher": []
+    },
+    {
+      "label": "UNO Q: Python logs",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq logs",
+      "isBackground": true,
+      "presentation": { "group": "unoq-watch", "panel": "dedicated", "reveal": "always", "clear": true, "showReuseMessage": false },
+      "problemMatcher": { "owner": "unoq", "pattern": { "regexp": "^\\b$" }, "background": { "activeBegins": true, "beginsPattern": "▸", "endsPattern": "▸" } }
+    },
+    {
+      "label": "UNO Q: MCU monitor",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq monitor",
+      "isBackground": true,
+      "presentation": { "group": "unoq-watch", "panel": "dedicated", "reveal": "always", "clear": true, "showReuseMessage": false },
+      "problemMatcher": { "owner": "unoq", "pattern": { "regexp": "^\\b$" }, "background": { "activeBegins": true, "beginsPattern": "▸", "endsPattern": "▸" } }
+    },
+    {
+      "label": "UNO Q: push",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq push",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true, "showReuseMessage": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "UNO Q: restart",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq restart",
+      "presentation": { "panel": "shared", "reveal": "always", "showReuseMessage": false },
+      "problemMatcher": {
+        "owner": "unoq-board-compile",
+        "fileLocation": ["relative", "${workspaceFolder}/apps/${config:unoq.app}"],
+        "pattern": { "regexp": "(sketch/[^:\\s]+):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5 }
+      }
+    },
+    {
+      "label": "UNO Q: stop app",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq stop",
+      "presentation": { "panel": "shared", "showReuseMessage": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "UNO Q: compile check (laptop)",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq compile",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true, "showReuseMessage": false },
+      "problemMatcher": { "base": "$gcc", "fileLocation": "absolute" }
+    },
+    {
+      "label": "UNO Q: doctor",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq doctor",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true, "showReuseMessage": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "UNO Q: shell",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq shell",
+      "presentation": { "panel": "dedicated", "reveal": "always", "focus": true, "showReuseMessage": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "UNO Q: record…",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq record ${input:recordLabel} ${input:recordSeconds}",
+      "presentation": { "panel": "shared", "reveal": "silent", "showReuseMessage": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "UNO Q: stop recording",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq record stop",
+      "presentation": { "panel": "shared", "reveal": "silent", "showReuseMessage": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "UNO Q: pull recordings",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq pull",
+      "presentation": { "panel": "shared", "reveal": "always", "showReuseMessage": false },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "recordLabel",
+      "type": "promptString",
+      "description": "Label for this recording (letters, digits, _ or -), e.g. flicker_18hz, steady, walk, shake_sim",
+      "default": "test"
+    },
+    {
+      "id": "recordSeconds",
+      "type": "pickString",
+      "description": "How long to record",
+      "options": ["5", "10", "20", "30", "60", "120"],
+      "default": "10"
+    }
+  ]
+}
