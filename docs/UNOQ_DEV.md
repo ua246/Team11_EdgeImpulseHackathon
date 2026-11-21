@@ -44,17 +44,17 @@ host to `arduino@<board-name>.local`. eduroam often blocks device-to-device traf
 ## Reading the output
 
 ```
-15:13:18.192 PY  [stat] IMU 50/s |a| 1.00g ▇▂▄▇▇▃▅▆ │ LIGHT 40/s G 1500 red 29% ██▁▁██▁▁ swing 87% ~10.0Hz
+15:13:18.192 PY  [stat] IMU 50/s |a| 1.00g ▇▂▄▇▇▃▅▆ │ LIGHT 36/s G 1500 red 29% ██▁▁██▁▁ swing 87% ~10.0Hz
 ```
 
-- **Rates (`/s`):** samples actually received per second. They should be about 50 (IMU) and 40 (light).
+- **Rates (`/s`):** samples actually received per second. They should be about 50 (IMU) and 36 (light; nominally 40).
   "no data" means a sensor is missing; check the Qwiic cable.
 - **Values:** `|a|` is total acceleration (about 1.00 g at rest). `G` is the light sensor's green
   channel (roughly brightness). `red` is the red share of the light.
 - **Sparkline:** the last 2 seconds of each signal.
 - **`~10.0Hz`:** the strongest light-flicker frequency, shown only when it clearly stands out. It
-  covers 1–20 Hz; faster flicker shows up at a wrong, lower frequency (the light sensor takes 40
-  readings a second, see DI-01).
+  covers about 1–18 Hz; faster flicker shows up at a wrong, lower frequency (the light sensor
+  takes about 36 readings a second, measured; see DI-01).
 - **`swing 87%`:** how much dimmer the dark phase is than the bright phase over the last 2 s.
   - Steady light reads a few percent.
   - Full on/off flashing reads 80–100%.

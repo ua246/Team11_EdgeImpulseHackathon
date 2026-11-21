@@ -10,7 +10,7 @@ pitch and the Q&A. IDs are never reused; gaps are entries removed with DI-22.
 
 | ID | Issue | Area | Severity | Status |
 |---|---|---|---|---|
-| [DI-01](#di-01-modulino-light-tops-out-at-40-samples-per-second) | Modulino Light tops out at 40 samples/s | Sensing | High | Accepted |
+| [DI-01](#di-01-modulino-light-takes-only-about-36-readings-per-second) | Modulino Light takes only about 36 readings/s | Sensing | High | Accepted |
 | [DI-02](#di-02-modulino-light-library-blocks-for-50150-ms) | Modulino Light library blocks for 50–150 ms | Firmware | High | Mitigated |
 | [DI-03](#di-03-modulino-light-has-a-fixed-i2c-address) | Modulino Light has a fixed I2C address | Hardware | Low | Accepted |
 | [DI-04](#di-04-mcu--linux-link-is-only-115200-baud) | MCU ↔ Linux link is only 115200 baud | Firmware | Medium | Mitigated |
@@ -30,19 +30,72 @@ pitch and the Q&A. IDs are never reused; gaps are entries removed with DI-22.
 
 ---
 
-## DI-01 Modulino Light tops out at 40 samples per second
-**Status:** Accepted (design decision, DI-22) · **Severity:** High · **Logged:** 2026-11-21
+## DI-01 Modulino Light takes only about 36 readings per second
+**Status:** Accepted (design decision, DI-22; measured on the board) · **Severity:** High · **Logged:** 2026-11-21
 
 **Limit.** The LTR-381RGB on the Modulino Light needs at least 25 ms per reading: the fastest
 settings in the Arduino_LTR381RGB library are 16-bit resolution (25 ms integration) and a 25 ms
-repeat rate. That gives at most 40 samples/s, so frequencies above 20 Hz fold back to the wrong
-value (aliasing). The flicker most likely to trigger seizures is 16–25 Hz (Epilepsy Society).
+repeat rate, nominally 40 readings/s. **On our board it measured 36.1–36.3 readings/s** (two runs
+of `apps/light-test`): the sensor's own clock runs about 10% slow, so each reading averages about
+27.6 ms. Frequencies above half that rate, **about 18 Hz**, fold back to a wrong, lower value
+(aliasing). The flicker most likely to trigger seizures is 16–25 Hz (Epilepsy Society).
 
-**What the sensor sees.** Each reading is the *average* light over its 25 ms, which also weakens
-fast flicker:
+**What the sensor sees.** Each reading is the *average* light over its window, which also weakens
+fast flicker. Predicted for the measured 36.2 readings/s:
 
-| True flicker | Strength after 25 ms averaging | Seen as (40 readings/s) |
-|---|---|---|
+| True flicker | Strength after averaging | Seen as | Measured (screen sweep) |
+|---|---|---|---|
+| 5 Hz | 97% | 5 Hz | 5.0 Hz ✓ |
+| 10 Hz | 88% | 10 Hz | **10.0 Hz ✓**, 76% strength |
+| 15 Hz | 74% | 15 Hz | 15.0 Hz ✓ |
+| 18 Hz | 64% | 18 Hz (at the limit) | screen artefact, see below |
+| 20 Hz | 57% | **16 Hz** | 16.3 Hz ✓ (folded as predicted) |
+| 25 Hz | 38% | **11 Hz** | screen artefact, see below |
+| 30 Hz | 20% | **6 Hz** | 6.3 Hz ✓ (folded as predicted) |
+| 35 Hz | 3% | **1 Hz** | – |
+| 36 Hz | 0% (invisible) | — | – |
+| 100 Hz (UK mains lighting) | 8% | **8.6 Hz** | seen in room light at ~8.6 Hz, 0.1% of the light level |
+
+**Measured (2026-11-21).** `apps/light-test`'s screen sweep: `tools/flicker.html` on the laptop
+screen, sensor 2–5 cm away. Report: `recordings/light-test/lighttest.20251210-192133.screen.report.txt`
+(the board's clock is unsynced).
+- **10 Hz: PASS.** It reads 10.0 Hz, and 9 and 11 Hz are correct too.
+- **Correct frequency from 1 to 15 Hz**, all 11 rates exact.
+- **20 and 30 Hz fold exactly where predicted.**
+- **The strength is a little below prediction:** 76% vs 88% at 10 Hz. Part of this is the screen's
+  slow pixel changes; the LED test separates the two.
+- **18 and 25 Hz read 6.1 and 5.0 Hz because of the screen.** A 60 Hz screen can't show those rates
+  evenly: the frame pattern repeats every 3 periods (18 Hz) or 5 periods (25 Hz), adding a 6 Hz or
+  5 Hz component that the sensor reports. Flashing video on 60 Hz screens has the same structure.
+- The LED rig run hasn't been done yet (the first attempt had no LED connected).
+
+**So:**
+- **The frequency is read correctly up to about 15 Hz;** 15–18 Hz is borderline; above about 18 Hz
+  it folds to a wrong, lower frequency.
+- **Flicker is still *detected* (yes/no) from 3 Hz to about 30 Hz,** at reduced strength. That's
+  enough for a warning, but not for weighting the 16–25 Hz peak band by its true frequency.
+- **Ripple from mains-powered lights (100 Hz in the UK) folds to about 8.6 Hz,** inside the
+  warning band. It is weak (8% predicted; 0.1% of the light level measured in room light), so
+  ignore anything below a minimum brightness swing (the broadcast guidelines only count changes of
+  about 10% or more). The reading rate varies a little between sensors, so the exact alias does too.
+- **Because each reading integrates over ~27 ms, short strobe flashes are not missed between
+  readings.** A 2 ms flash still adds its energy to the reading it falls in (DI-18).
+
+**Possible upgrade (not planned): two Modulino Lights half a period out of step** would give about
+72 readings/s and correct frequencies up to about 30 Hz. But both sensors have the same fixed
+address, so they need separate I2C buses (DI-03). Their clocks drift apart within about a second,
+so one sensor must be restarted periodically to keep the offset. The averaging is unchanged, and
+the two units need matching. That's about 2–3 h of work with hardware risk.
+
+**Tests.** `apps/light-test` (README there):
+- **LED rig** (`hardware/light-test`): flashes a test LED at 1–35 Hz and in short flashes into the
+  sensor.
+- **Screen sweep:** `tools/flicker.html` → Sweep, analysed with `screen_sweep.py`.
+
+Both report the frequency seen against the predicted alias, the strength against the averaging
+prediction, and the usable band.
+
+---|---|---|
 | 5 Hz | 97% | 5 Hz |
 | 10 Hz | 90% | 10 Hz |
 | 15 Hz | 78% | 15 Hz |
@@ -89,7 +142,7 @@ about 50–150 ms, which would stall the IMU sampling and limit light to about 1
 sensor once (continuous colour mode, 16-bit / 25 ms), check the data-ready bit without waiting, and
 read the colour registers directly. The register map was taken from the library source.
 
-**Check on hardware:** `sensor-stream`'s `[stat]` line should show `LIGHT ~40/s`. If readings
+**Check on hardware:** `sensor-stream`'s `[stat]` line should show `LIGHT ~36/s` (measured, DI-01). If readings
 saturate in bright light, lower the gain; if dim light reads near 0, raise it (register 0x05).
 
 ---
@@ -216,12 +269,12 @@ Close this issue after a successful `tools/unoq dev` plus a recording on the rea
 **Flashes in video content.** A video can change at most once per frame, so its fastest flash is
 half the frame rate: 12–15 Hz for 24/25/30 fps content, 25–30 Hz for 50/60 fps (games, sport). The
 Modulino Light reads the first group at the right frequency; the second group is still detected
-but folds to 10–15 Hz (DI-01).
+but folds to about 6–16 Hz (DI-01).
 
 **Hidden fast flicker from screens is averaged out.** Screen refresh (60–240 Hz) and backlight /
 OLED dimming (PWM, often 200 Hz to several kHz) is not the seizure risk. The 25 ms integration
 averages it to a few percent, below the brightness-swing threshold. Mains ripple (100 Hz) leaks
-through at about 13%, as a weak fake 20 Hz signal, and is handled by the same threshold.
+through at about 8%, folded to about 8.6 Hz, and is handled by the same threshold.
 
 **Short strobe flashes are caught.** Because each reading integrates 25 ms of light, a short flash
 (a xenon strobe under 1 ms, or an LED strobe of a few ms) can't fall between readings. It shows up

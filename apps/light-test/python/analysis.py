@@ -3,10 +3,10 @@
 Used by main.py on the board, and on the laptop to re-analyse a saved run:
     python3 apps/light-test/python/analysis.py recordings/light-test/lighttest.<time>.csv
 
-The model being tested (DI-01): the Modulino Light averages the light over 25 ms per reading and
-takes about 40 readings/s. So a square wave at f Hz should show up
-  * at f itself while f is below half the reading rate (20 Hz), and at |f - k·fs| above it;
-  * with a fundamental of |sinc(f·T)| (T = 25 ms) of its full strength (2/π of the on-off step).
+The model being tested (DI-01): the Modulino Light averages the light over one reading period
+(nominally 25 ms; 40 readings/s, measured about 36/s on our board). So a square wave at f Hz should show up
+  * at f itself while f is below half the reading rate (about 18 Hz), and at |f - k·fs| above it;
+  * with a fundamental of |sinc(f·T)| (T = 1/fs, measured) of its full strength (2/π of the on-off step).
 Short flashes are summed into the reading they fall in, so none should be missed.
 """
 
@@ -111,7 +111,8 @@ def context(steps):
         if len(t) > 2:
             gaps += int((np.diff(t) > 1.5 / fs).sum())
     ctx = {"fs": fs, "T": 1.0 / fs, "gaps": gaps, "channel": 1, "contrast": None,
-           "dark": None, "steady": None, "noise": 1.0, "saturated": False, "levels": {}}
+           "dark": None, "steady": None, "noise": 1.0, "saturated": False, "levels": {},
+           "seen": True, "step_seen": None}
 
     def first(kind):
         for i in sorted(steps):
@@ -129,6 +130,8 @@ def context(steps):
                    steady=float(steady[:, ch].mean()), noise=max(float(dark[:, ch].std()), 1.0),
                    saturated=bool(sat[ch]),
                    levels={CHANNELS[c]: (float(dark[:, c].mean()), float(steady[:, c].mean())) for c in range(3)})
+        if contrast[ch] < max(200.0, 20 * ctx["noise"]):   # the light source never reached the sensor
+            ctx.update(seen=False, step_seen=float(contrast[ch]), contrast=None)
     else:  # Python joined late: estimate the on-off step from the slow square waves
         slow = [settled(s)[1] for s in steps.values() if s["kind"] == "square" and 0 < s["freq"] <= 8]
         slow = [x for x in slow if len(x) >= 10]
@@ -158,7 +161,8 @@ def analyse_square(step, ctx):
     if region == "edge":
         model_ok = True   # at half the reading rate the result depends on phase: no prediction
     else:
-        amp_ok = response is None or abs(response - predicted) <= max(0.15, 0.25 * predicted)
+        amp_ok = (response is None or not ctx.get("judge_amplitude", True)
+                  or abs(response - predicted) <= max(0.15, 0.25 * predicted))
         model_ok = folds and amp_ok
     if region == "edge":
         result = f"at the limit: reads {seen:.1f} Hz" if clear else "at the limit: no clear frequency"
@@ -210,10 +214,13 @@ def analyse_flash(step, ctx):
 
 # ---- Report -----------------------------------------------------------------------------------
 
-def report(steps, n_steps, rng=None, ends=None, title="light-test"):
-    """Full report. Returns (lines, verdicts) where each verdict is (name, PASS|PARTIAL|FAIL, detail)."""
+def report(steps, n_steps, rng=None, ends=None, title="light-test", source="LED", judge_amplitude=True, notes=()):
+    """Full report. Returns (lines, verdicts) where each verdict is (name, PASS|PARTIAL|FAIL, detail).
+    source names the light source in messages; judge_amplitude=False judges folding by frequency only
+    (for sources with soft edges, such as a screen)."""
     ends = ends or {}
     ctx = context(steps)
+    ctx["judge_amplitude"] = judge_amplitude
     ch = CHANNELS[ctx["channel"]]
     L = [f"Modulino Light flicker test · {title}", ""]
     L.append("Setup")
@@ -224,14 +231,19 @@ def report(steps, n_steps, rng=None, ends=None, title="light-test"):
              f"half the rate = {ctx['fs'] / 2:.1f} Hz" + (f"; {ctx['gaps']} missed readings" if ctx["gaps"] else ""))
     if ctx["levels"]:
         lv = ", ".join(f"{c} {d:.0f}→{s:.0f}" for c, (d, s) in ctx["levels"].items())
-        L.append(f"  dark→LED on: {lv}; analysed channel: {ch} (largest step, noise {ctx['noise']:.1f} counts)")
+        L.append(f"  dark→{source} on: {lv}; analysed channel: {ch} (largest step, noise {ctx['noise']:.1f} counts)")
     elif ctx["contrast"]:
         L.append(f"  dark/steady steps missing: on-off step estimated from the slow square waves ({ch})")
+    L += [f"  {n}" for n in notes]
     warnings = []
-    if ctx["contrast"] is not None and ctx["contrast"] < 1000:
-        warnings.append("LED barely reaches the sensor (on-off step < 1000 counts): check D1 faces the window")
+    if not ctx["seen"]:
+        warnings.append(f"the sensor didn't see the {source} (on − off = {ctx['step_seen']:.0f} counts): "
+                        + ("check the wiring (D3 → R2 → Q1, LED polarity) and that D1 faces the sensor"
+                           if source == "LED" else "hold the sensor facing the screen"))
+    elif ctx["contrast"] is not None and ctx["contrast"] < 1000:
+        warnings.append(f"the {source} barely reaches the sensor (on-off step < 1000 counts)")
     if ctx["saturated"]:
-        warnings.append("steady LED saturates the sensor: add paper between LED and sensor, or move it away")
+        warnings.append(f"the steady {source} saturates the sensor: add paper in front of the sensor, or move it away")
     missing = [i for i in range(n_steps) if i not in steps]
     if missing:
         warnings.append(f"{len(missing)} of {n_steps} steps missed (Python started late): restart the app for a full run")
@@ -327,6 +339,8 @@ def report(steps, n_steps, rng=None, ends=None, title="light-test"):
         verdicts.append(("Modulino Light as the flicker sensor", overall,
                          f"frequency reliable up to {top:g} Hz, flicker detected up to "
                          f"{max([r['f'] for _, r in sq if r['detected']] or [0]):g} Hz"))
+    if not ctx["seen"]:   # nothing to judge the sensor on
+        verdicts = [("test setup", "FAIL", f"the sensor never saw the {source}; the Modulino Light was not tested")]
     L += ["", "Verdicts"] + [f"  VERDICT {n}: {s} ({d})" for n, s, d in verdicts]
     return L, verdicts
 

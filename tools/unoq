@@ -92,7 +92,7 @@ resolve_flash_mode() {
   if [[ -n "$LAPTOP_CORE" && -n "$BOARD_CORE" && "$LAPTOP_CORE" != "$BOARD_CORE" ]]; then FLASH_MODE=laptop; fi
   return 0
 }
-has_sketch() { [[ -f "$REPO/apps/$APP/sketch/sketch.ino" ]]; }
+has_sketch() { [[ -z "${UNOQ_NO_SKETCH:-}" && -f "$REPO/apps/$APP/sketch/sketch.ino" ]]; }
 
 # App Lab runs one app at a time: stop any other running app before starting ours.
 stop_other_apps() {

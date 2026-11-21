@@ -5,8 +5,10 @@ Light at known rates), prints one line per finished step, then the report and VE
 saves:
     data/recordings/lighttest.<time>.report.txt    the report
     data/recordings/lighttest.<time>.csv           every reading (re-analyse with analysis.py)
+    data/recordings/lighttest.<time>.live.csv      readings outside the sweep (screen test: screen_sweep.py)
 Copy them to the laptop with `tools/unoq pull` (→ recordings/light-test/).
-After the sweep it prints a live readout once a second, for manual checks with tools/flicker.html.
+After the sweep it prints a live readout once a second, for manual checks with tools/flicker.html, and
+saves those readings so tools/flicker.html → "Sweep" can be analysed on the laptop.
 The analysis itself is in analysis.py.
 """
 
@@ -33,6 +35,8 @@ runs = {}                                  # run id -> state, see get_run()
 events = deque()                           # ("end", run, idx) / ("done", run) for the main loop
 live = deque(maxlen=int(40 * LIVE_S))      # (t_s, r, g, b) while no step is running
 counts = {"live": 0, "orphan": 0, "bad": 0}
+LIVE_STAMP = time.strftime("%Y%m%d-%H%M%S")
+live_file = {"f": None}
 state = {"running": False, "last_msg": time.monotonic(), "channel": 1, "rerun_asked": False,
          "warned_at": 0.0, "started": time.monotonic()}
 
@@ -44,6 +48,18 @@ def get_run(run):
              "stamp": time.strftime("%Y%m%d-%H%M%S")}
         runs[run] = r
     return r
+
+
+def live_csv():
+    if live_file["f"] is None:
+        try:
+            REC_DIR.mkdir(parents=True, exist_ok=True)
+            live_file["f"] = open(REC_DIR / f"lighttest.{LIVE_STAMP}.live.csv", "w")
+            live_file["f"].write("t_ms,red,green,blue\n")
+        except OSError as e:
+            print(f"[warn] can't save live readings: {e}", flush=True)
+            live_file["f"] = False
+    return live_file["f"] or None
 
 
 def csv_of(r):
@@ -98,6 +114,9 @@ def on_s(run, idx, batch):
         if idx < 0:
             live.extend(rows)
             counts["live"] += len(rows)
+            f = live_csv()
+            if f:
+                f.writelines(f"{t * 1000:.1f},{a},{g},{b}\n" for t, a, g, b in rows)
             return
         r = runs.get(run)
         st = r["steps"].get(idx) if r else None
@@ -210,7 +229,7 @@ def finish(run):
             print(f"[warn] {n - len(steps)} steps were missed and the sketch didn't take a rerun request ({e}). "
                   "Run `tools/unoq restart` for a full run.", flush=True)
     print("[test] live readout follows (LED off). Point the sensor at tools/flicker.html for manual checks: "
-          "true rates read correctly up to about 18 Hz; faster flicker shows lower (25 → 15 Hz, 30 → 10 Hz).",
+          "true rates read correctly up to about 15 Hz; faster flicker shows lower (20 → 16 Hz, 25 → 11 Hz, 30 → 6 Hz).",
           flush=True)
 
 
@@ -270,6 +289,9 @@ def loop():
         _next += 1.0
         if not state["running"]:
             live_line()
+        with lock:
+            if live_file["f"]:
+                live_file["f"].flush()
         quiet = now - state["last_msg"]
         if quiet > 12 and now - state["warned_at"] > 30:
             state["warned_at"] = now
@@ -283,4 +305,6 @@ def loop():
 
 print("[boot] light-test started · the sketch runs the sweep by itself 6 s after it boots "
       "(~2.5 min); results print as each step ends", flush=True)
+print(f"[rec] live readings → data/recordings/lighttest.{LIVE_STAMP}.live.csv "
+      "(screen test: tools/flicker.html → Sweep, then screen_sweep.py)", flush=True)
 App.run(user_loop=loop)
