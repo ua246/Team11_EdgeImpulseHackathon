@@ -1,3 +1,0 @@
-name: MAX30102 Strobe Test
-icon: ⚡
-description: "Team 11: can the MAX30102 heart-rate sensor detect strobe light? Records it at 400/s with its LED alternating on/off; analysed on the laptop."

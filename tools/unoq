@@ -104,7 +104,7 @@ for a in json.load(sys.stdin).get("apps", []):
     if a.get("status") not in ("running", "starting"):
         continue
     raw = a.get("id", "")
-    try:   # App Lab 0.7 lists IDs base64-encoded ("dXNlcjpoci10ZXN0" = "user:hr-test")
+    try:   # App Lab 0.7 lists IDs base64-encoded ("dXNlcjpzZW5zb3Itc3RyZWFt" = "user:sensor-stream")
         ident = base64.b64decode(raw + "=" * (-len(raw) % 4), validate=True).decode()
     except Exception:
         ident = raw

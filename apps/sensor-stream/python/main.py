@@ -2,8 +2,8 @@
 
 Receives sensor batches from sketch/sketch.ino over the Bridge and:
   * prints one status line per second: sample rates, latest values, a sparkline of the
-    last 2 s, and the dominant frequency of the light and heart beat signals
-    (this is the hour-one check: does the sensor see 5 / 15 / 25 Hz flicker correctly?)
+    last 2 s, and the dominant frequency of the light signal
+    (quick check with tools/flicker.html: does the sensor see 5 / 10 / 15 Hz flicker?)
   * records labelled CSV files for Edge Impulse when asked:
         tools/unoq record <label> <seconds>      (from the laptop)
     which writes data/record.json; files land in data/recordings/<label>.<time>.<stream>.csv
@@ -21,11 +21,9 @@ from arduino.app_utils import App, Bridge
 # Nominal rates: keep in sync with the constants at the top of sketch/sketch.ino.
 IMU_HZ = 50
 LIGHT_HZ = 40  # LTR-381RGB hardware maximum (one reading per 25 ms)
-HB_HZ = 200
 WINDOW_S = 2.0
 G = 9.80665
 LIGHT_FULL_SCALE = 65535  # 16-bit light sensor counts
-HB_FULL_SCALE = 1023      # 10-bit analogRead (UNO Q core default)
 
 APP_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = APP_DIR / "data"
@@ -35,15 +33,13 @@ REC_DIR = DATA_DIR / "recordings"
 HEADERS = {
     "imu": "timestamp,accX,accY,accZ,gyrX,gyrY,gyrZ",  # ms, m/s^2, deg/s
     "light": "timestamp,red,green,blue",               # ms, raw counts
-    "hb": "timestamp,hb",                              # ms, raw ADC
 }
 
 lock = threading.Lock()
 imu_win = deque(maxlen=int(IMU_HZ * WINDOW_S))      # |a| in g
 light_win = deque(maxlen=int(LIGHT_HZ * WINDOW_S))  # green channel (closest to brightness)
 red_win = deque(maxlen=int(LIGHT_HZ * WINDOW_S))    # red share of r+g+b
-hb_win = deque(maxlen=int(HB_HZ * WINDOW_S))
-counts = {"imu": 0, "light": 0, "hb": 0, "bad": 0}
+counts = {"imu": 0, "light": 0, "bad": 0}
 latest = {}
 mcu = {}
 
@@ -139,36 +135,18 @@ def on_light(batch: str):
         recorder.write("light", rows)
 
 
-def on_hb(t0: int, batch: str):
-    rows = []
-    with lock:
-        for tok in batch.split():
-            try:
-                rel, val = (int(v) for v in tok.split(":"))
-            except ValueError:
-                counts["bad"] += 1
-                continue
-            counts["hb"] += 1
-            hb_win.append(val)
-            latest["hb"] = val
-            if recorder.label:
-                rows.append(f"{t0 + rel},{val}")
-        recorder.write("hb", rows)
-
-
-def on_mcu(imu_ok, light_ok, n_imu, n_light, n_hb, hb_missed, max_flush_us):
+def on_mcu(imu_ok, light_ok, n_imu, n_light, max_flush_us):
     with lock:
         for name, now_ok in (("IMU", imu_ok), ("Light sensor", light_ok)):
             was = mcu.get(name)
             if was is not None and bool(was) != bool(now_ok):
                 print(f"[mcu] {name}: {'connected' if now_ok else 'LOST'}", flush=True)
             mcu[name] = now_ok
-        mcu["report"] = (n_imu, n_light, n_hb, hb_missed, max_flush_us)
+        mcu["report"] = (n_imu, n_light, max_flush_us)
 
 
 Bridge.provide("imu", on_imu)
 Bridge.provide("light", on_light)
-Bridge.provide("hb", on_hb)
 Bridge.provide("mcu", on_mcu)
 
 
@@ -248,7 +226,7 @@ def print_status():
         c = dict(counts)
         for k in counts:
             counts[k] = 0
-        imu, light, red, hb = list(imu_win), list(light_win), list(red_win), list(hb_win)
+        imu, light, red = list(imu_win), list(light_win), list(red_win)
         lat, rep = dict(latest), mcu.get("report")
         rec = (recorder.label, recorder.remaining()) if recorder.label else None
 
@@ -263,20 +241,14 @@ def print_status():
                      f"{swing_text(light, LIGHT_FULL_SCALE)} {freq_text(light, LIGHT_HZ, 1.0, LIGHT_HZ / 2)}")
     else:
         parts.append("LIGHT no data (Qwiic cable?)")
-    if c["hb"]:
-        parts.append(f"HB {c['hb'] / dt:4.0f}/s {lat['hb']:5d} {spark(hb)} "
-                     f"{swing_text(hb, HB_FULL_SCALE)} {freq_text(hb, HB_HZ, 0.5, 60.0)}")
-    else:
-        parts.append("HB    no data")
     if rec:
         parts.append(f"● REC {rec[0]} {rec[1]:.0f}s")
     print("[stat] " + " │ ".join(parts), flush=True)
 
     if c["bad"]:
         print(f"[warn] {c['bad']} malformed samples in the last second", flush=True)
-    if rep and (rep[3] or rep[4] > 20000):
-        print(f"[warn] MCU: {rep[3]} heart beat samples missed, slowest Bridge send {rep[4] / 1000:.1f} ms",
-              flush=True)
+    if rep and rep[2] > 20000:
+        print(f"[warn] MCU: slowest Bridge send {rep[2] / 1000:.1f} ms (the 115200-baud link is busy)", flush=True)
 
 
 # ---- Record requests from the laptop (data/record.json) ----------------------------------
@@ -324,6 +296,6 @@ def loop():
     time.sleep(0.05)
 
 
-print(f"[boot] sensor-stream started · IMU {IMU_HZ} Hz, light ≤{LIGHT_HZ} Hz, heart beat {HB_HZ} Hz "
+print(f"[boot] sensor-stream started · IMU {IMU_HZ} Hz, light ≤{LIGHT_HZ} Hz "
       f"· recordings → {REC_DIR}", flush=True)
 App.run(user_loop=loop)

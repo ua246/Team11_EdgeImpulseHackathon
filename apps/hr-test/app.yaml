@@ -1,3 +1,0 @@
-name: Heart Rate Test
-icon: ❤️
-description: "Team 11: finds the heart beat sensor (MAX3010x over I2C, or an analog module), streams it at 100/s and checks that a pulse and heart rate can be measured."

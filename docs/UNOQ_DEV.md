@@ -44,25 +44,22 @@ host to `arduino@<board-name>.local`. eduroam often blocks device-to-device traf
 ## Reading the output
 
 ```
-15:13:18.192 PY  [stat] IMU 50/s |a| 1.00g ▇▂▄▇▇▃▅▆ │ LIGHT 40/s G 1500 red 29% ██▁▁██▁▁ swing 87% ~18.0Hz │ HB 200/s 900 ▄▄▁▁██▁▁ swing 83% ~25.0Hz
+15:13:18.192 PY  [stat] IMU 50/s |a| 1.00g ▇▂▄▇▇▃▅▆ │ LIGHT 40/s G 1500 red 29% ██▁▁██▁▁ swing 87% ~10.0Hz
 ```
 
-- **Rates (`/s`):** samples actually received per second. They should be about 50 / 40 / 200.
+- **Rates (`/s`):** samples actually received per second. They should be about 50 (IMU) and 40 (light).
   "no data" means a sensor is missing; check the Qwiic cable.
 - **Values:** `|a|` is total acceleration (about 1.00 g at rest). `G` is the light sensor's green
-  channel (roughly brightness). `red` is the red share of the light. HB is the raw ADC value.
+  channel (roughly brightness). `red` is the red share of the light.
 - **Sparkline:** the last 2 seconds of each signal.
-- **`~18.0Hz`:** the strongest frequency, shown only when it clearly stands out.
-  - Light covers 1–20 Hz.
-  - The heart beat sensor channel covers 0.5–60 Hz, so a pulse shows as about 1–2 Hz. If its light
-    detector sees flicker, that flicker frequency shows here instead.
-- **`swing 83%`:** how much dimmer the dark phase is than the bright phase over the last 2 s.
+- **`~10.0Hz`:** the strongest light-flicker frequency, shown only when it clearly stands out. It
+  covers 1–20 Hz; faster flicker shows up at a wrong, lower frequency (the light sensor takes 40
+  readings a second, see DI-01).
+- **`swing 87%`:** how much dimmer the dark phase is than the bright phase over the last 2 s.
   - Steady light reads a few percent.
   - Full on/off flashing reads 80–100%.
   - Mains ripple and distant screens read low, so use this to set the alert threshold.
   - `SAT` means the bright phase hit the top of the sensor's range: move or shade the sensor.
-  - It's only meaningful when 0 means dark. A heart beat module with a built-in amplifier may
-    centre its output mid-range instead.
 - **Colours:**
   - `[warn]` (yellow) means samples were missed or the Bridge is slow.
   - `[rec]` (magenta) is recording status.
@@ -80,14 +77,13 @@ host to `arduino@<board-name>.local`. eduroam often blocks device-to-device traf
    |---|---|---|
    | `imu` | 50 Hz | timestamp (ms), accX/Y/Z (m/s²), gyrX/Y/Z (°/s) |
    | `light` | ≤40 Hz | timestamp (ms), red, green, blue (raw counts) |
-   | `hb` | 200 Hz | timestamp (ms), hb (raw ADC) |
 
 4. In Edge Impulse Studio go to **Data acquisition → Upload data**. The CSV Wizard uses the
    `timestamp` column, and the label is the part of the file name before the first dot.
 
-The streams have different rates, so give each model its own streams (e.g. light model: `light` +
-`hb`; seizure model: `imu` + `hb`), or resample before merging. `recordings/` is git-ignored;
-share datasets through Edge Impulse.
+The streams have different rates, so give each model its own stream (light model: `light`;
+seizure model: `imu`), or resample before merging. `recordings/` is git-ignored; share datasets
+through Edge Impulse.
 
 ## Repo layout
 
@@ -97,9 +93,9 @@ apps/sensor-stream/        App Lab app: comms test + data recorder (copy it to s
   python/main.py           Linux side: receives data, prints status, records CSVs
   sketch/sketch.ino        MCU side: reads sensors, sends batches over the Bridge
   sketch/sketch.yaml       sketch libraries (Arduino_Modulino 0.7.0, as in Arduino's own examples)
-apps/detector-test/        automated test: is the heart beat module fast enough for flicker? (PASS/PARTIAL/FAIL)
-apps/camera-test/          automated test of the Arduino USB Camera (fps, exposure, flicker limits) + live readout
-hardware/detector-test/    KiCad schematic + PDF + parts list for the detector test rig
+apps/light-test/           automated test: how well does the Modulino Light read flicker? (test LED sweep)
+hardware/light-test/       KiCad schematic + PDF + parts list for the light test rig
+tools/flicker.html         flicker test page (1-30 Hz, white/red/blue) for manual checks and data collection
 tools/unoq                 command-line helper (adb or SSH)
 tools/pretty.py            timestamps, colours and log files for board output
 tools/stubs/               editor-only stubs for arduino.app_utils
@@ -114,12 +110,13 @@ decisions is in [DESIGN_ISSUES.md](DESIGN_ISSUES.md).
 - **Qwiic connector = `Wire1`**, not `Wire`. Call `Modulino.begin(Wire1)`.
 - **Modulino Light maxes out at 40 Hz:** the sensor needs at least 25 ms per reading. The library's
   `ModulinoLight::update()` also blocks for about 50–150 ms per call, which would stall everything
-  else, so `sketch.ino` reads the sensor's registers directly. Flicker above 20 Hz needs a faster
-  sensor (see the heart beat sensor idea in the project brief).
+  else, so the sketches read the sensor's registers directly. Flicker frequency is read correctly
+  only up to about 15–20 Hz; faster flicker folds to a lower frequency (DI-01, tested by
+  `apps/light-test`).
 - **The microcontroller ↔ Linux link is a 115200-baud UART,** about 11 KB/s in total, shared by
   all Bridge traffic. Send batches, keep messages small, and watch for `[warn]` lines.
 - **Voltages:** header pins are 3.3 V logic. **A0/A1 are not 5 V tolerant,** and no pin may exceed
-  3.3 V while used as an analog input. Power the heart beat sensor from 3.3 V. It is read on **A2**.
+  3.3 V while used as an analog input. Power any analog sensor from 3.3 V.
 - **`Serial.print()` and `Monitor.print()`** both appear in the MCU monitor (Zephyr core 0.55 and later).
 - **Never call `Monitor.print()` or `Bridge.call()` inside a function registered with
   `Bridge.provide()`.** It can deadlock; use `Bridge.provide_safe()` instead.

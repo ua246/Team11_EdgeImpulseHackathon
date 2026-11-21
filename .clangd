@@ -10,17 +10,12 @@ If:
 CompileFlags:
   CompilationDatabase: build/sensor-stream
 ---
-If:
-  PathMatch: apps/detector-test/.*
-CompileFlags:
-  CompilationDatabase: build/detector-test
----
 CompileFlags:
   Remove: [-mfp16-format=*, -fno-reorder-functions, -fno-defer-pop, -fno-freestanding, -mabi=*, --param=*, -fdiagnostics-color=*, -fno-printf-return-value, -fno-ipa-*]
 Diagnostics:
   Suppress: [drv_unknown_argument, drv_unsupported_opt, drv_unknown_argument_with_suggestion]
 ---
 If:
-  PathMatch: apps/camera-test/.*
+  PathMatch: apps/light-test/.*
 CompileFlags:
-  CompilationDatabase: build/camera-test
+  CompilationDatabase: build/light-test
