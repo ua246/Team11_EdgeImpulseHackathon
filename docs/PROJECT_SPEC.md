@@ -259,13 +259,11 @@ Full log: `docs/DESIGN_ISSUES.md` on
 
 ---
 
-## 15. Other project options (kept as backups)
+## 15. Fallback and rejected options
 
-| Option | What | When to switch |
+| Fallback | What | When to switch |
 |---|---|---|
-| **A. FlickerGuard light-only** | Prevent loop only: Model A + vibration + log (+ servo eye shutter, F10). Same hardware | Model B isn't working by Sunday 10:00 |
-| **B. Closed-loop freezing-of-gait cueing (Parkinson's)** | IMU on the shin detects freezing of gait; Vibro/Buzzer give a rhythmic cue until walking resumes; logs freezes. Public dataset: Daphnet (10 patients, ankle/thigh/trunk accelerometers at 64 Hz, 237 freezes) [6] | The light sensing turns out unworkable (T1 FAIL and no phototransistor) |
-| **C. Stroke-rehab exercise coach** | Counts reps and flags compensating movements with the IMU | Lower priority |
+| **FlickerGuard light-only** | Prevent loop only: Model A + vibration + log (+ servo eye shutter, F10). Same hardware | Model B isn't working by Sunday 10:00 |
 
 **Rejected:**
 - Raspberry Pi 5 + Camera Module 3 as the detector: breaks the "runs on the UNO Q" rule, and that
@@ -298,6 +296,5 @@ Full log: `docs/DESIGN_ISSUES.md` on
 3. Epilepsy Society: Minimising risk from flashing lights. https://epilepsysociety.org.uk/node/3618
 4. W3C: Understanding WCAG 2.1 SC 2.3.1, Three Flashes or Below Threshold. https://www.w3.org/WAI/WCAG21/Understanding/three-flashes-or-below-threshold.html
 5. Beniczky S. et al. Automated seizure detection using wearable devices: a clinical practice guideline of the ILAE and IFCN. *Epilepsia / Clinical Neurophysiology*, 2021. https://pubmed.ncbi.nlm.nih.gov/33678577/
-6. Roggen D., Plotnik M., Hausdorff J. Daphnet Freezing of Gait dataset, UCI (CC BY 4.0). https://archive.ics.uci.edu/dataset/245/daphnet+freezing+of+gait
-7. Arduino: UNO Q, Modulino, App Lab and Bridge documentation. https://docs.arduino.cc/hardware/uno-q/
-8. Edge Impulse: Arduino UNO Q support. https://docs.edgeimpulse.com/hardware/boards/arduino-uno-q
+6. Arduino: UNO Q, Modulino, App Lab and Bridge documentation. https://docs.arduino.cc/hardware/uno-q/
+7. Edge Impulse: Arduino UNO Q support. https://docs.edgeimpulse.com/hardware/boards/arduino-uno-q
