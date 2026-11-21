@@ -1,0 +1,26 @@
+# clangd setup for the Arduino sketches (.ino) in apps/*, compiled for the UNO Q.
+# `tools/unoq compile` (or the "compile check (laptop)" task) writes build/<app>/compile_commands.json.
+If:
+  PathMatch: .*\.ino
+CompileFlags:
+  Add: [-xc++, -include, Arduino.h]
+---
+If:
+  PathMatch: apps/sensor-stream/.*
+CompileFlags:
+  CompilationDatabase: build/sensor-stream
+---
+CompileFlags:
+  Remove: [-mfp16-format=*, -fno-reorder-functions, -fno-defer-pop, -fno-freestanding, -mabi=*, --param=*, -fdiagnostics-color=*, -fno-printf-return-value, -fno-ipa-*]
+Diagnostics:
+  Suppress: [drv_unknown_argument, drv_unsupported_opt, drv_unknown_argument_with_suggestion]
+---
+If:
+  PathMatch: apps/light-test/.*
+CompileFlags:
+  CompilationDatabase: build/light-test
+---
+If:
+  PathMatch: apps/flicker-guard/.*
+CompileFlags:
+  CompilationDatabase: build/flicker-guard

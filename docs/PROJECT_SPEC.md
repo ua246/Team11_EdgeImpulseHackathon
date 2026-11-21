@@ -1,8 +1,10 @@
 # FlickerGuard: design spec and project outline
 
 **Team 11** · CUES × Edge Impulse × Cambridge MedTech Foundation Hackathon · 21–22 Nov 2026
-**Status:** v0.2 draft (Modulino Light as the only light sensor), a living document. Code and dev tooling are on the
-[`otk/dev`](https://github.com/ua246/Team11_EdgeImpulseHackathon/tree/otk/dev) branch.
+**Status:** v0.2 draft (Modulino Light as the only light sensor), a living document. Code, tests and
+schematics are in this repo (`apps/`, `tools/`, `hardware/`); day-to-day work happens on
+[`otk/dev`](https://github.com/ua246/Team11_EdgeImpulseHackathon/tree/otk/dev). Current status and the
+plan for day 2: [BRIEF.md](BRIEF.md).
 
 > A wearable for people with photosensitive epilepsy. It **warns** the wearer about
 > seizure-provoking flashing light, and if a convulsive seizure follows anyway, it **detects it and

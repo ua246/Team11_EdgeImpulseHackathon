@@ -1,0 +1,342 @@
+#!/usr/bin/env bash
+# unoq: work with the Arduino UNO Q from this repo.
+#
+# Transport: adb over USB-C by default. To use SSH over Wi-Fi instead:
+#     export UNOQ_HOST=arduino@<board-name>.local
+# App: apps/$UNOQ_APP (default: sensor-stream), installed on the board as user:$UNOQ_APP.
+#
+# Run `tools/unoq help` for the command list.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP="${UNOQ_APP:-sensor-stream}"
+HOST="${UNOQ_HOST:-}"
+REMOTE_APPS=/home/arduino/ArduinoApps
+FQBN=arduino:zephyr:unoq
+# ControlMaster reuses one SSH connection, so a password is asked at most once per 10 minutes.
+SSH_OPTS=(-o ConnectTimeout=5 -o ServerAliveInterval=10
+          -o ControlMaster=auto -o "ControlPath=$HOME/.ssh/unoq-%C" -o ControlPersist=10m)
+PRETTY=(python3 -u "$REPO/tools/pretty.py")
+
+if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
+  B=$'\e[1m' G=$'\e[32m' R=$'\e[31m' Y=$'\e[33m' D=$'\e[2m' X=$'\e[0m'
+else
+  B= G= R= Y= D= X=
+fi
+say()  { printf '%s▸ %s%s\n' "$B" "$*" "$X" >&2; }
+ok()   { printf '  %s✓%s %s\n' "$G" "$X" "$*" >&2; }
+bad()  { printf '  %s✗%s %s\n' "$R" "$X" "$*" >&2; }
+hint() { printf '    %s%s%s\n' "$D" "$*" "$X" >&2; }
+die()  { printf '%s✗ %s%s\n' "$R" "$*" "$X" >&2; exit 1; }
+
+[[ "$APP" =~ ^[A-Za-z0-9._-]+$ ]] || die "Bad app name '$APP' (letters, digits, . _ - only)"
+
+link_name() { if [[ -n "$HOST" ]]; then echo "ssh $HOST"; else echo "adb (USB)"; fi; }
+
+# adb sets TMPDIR to Android's /data/local/tmp, which doesn't exist on the UNO Q (sketch builds fail).
+ADB_ENV="export TMPDIR=/tmp;"
+# App path on the board: works with every arduino-app-cli version (user:<name> IDs need 0.14+).
+APP_PATH="$REMOTE_APPS/$APP"
+# Commands that changed between arduino-app-cli versions (0.7 on early boards, 0.14 in current docs).
+CLI_VERBOSE='$(arduino-app-cli app start --help 2>&1 | grep -q -- --verbose && echo --verbose)'
+CLI_PS='if arduino-app-cli app --help 2>&1 | grep -qE "^  ps "; then arduino-app-cli app ps --all; else arduino-app-cli app list; fi'
+CLI_MONITOR='if arduino-app-cli --help 2>&1 | grep -qE "^  monitor "; then arduino-app-cli monitor; else arduino-app-cli app monitor; fi'
+
+# Run a command on the board.
+on_board() {
+  if [[ -n "$HOST" ]]; then ssh "${SSH_OPTS[@]}" "$HOST" "$1"; else adb shell "$ADB_ENV $1"; fi
+}
+# Same with a terminal attached, so Ctrl+C also stops the command on the board.
+on_board_tty() {
+  if [[ -n "$HOST" ]]; then ssh -tt "${SSH_OPTS[@]}" "$HOST" "$1"; else adb shell -tt "$ADB_ENV $1"; fi
+}
+
+need_board() {
+  if [[ -n "$HOST" ]]; then
+    ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$HOST" true 2>/dev/null \
+      || ssh "${SSH_OPTS[@]}" "$HOST" true \
+      || die "Cannot SSH to $HOST. Is the board on the same network? (tools/unoq doctor)"
+  else
+    command -v adb >/dev/null || die "adb is not installed. Arch/CachyOS: sudo pacman -S android-tools · Debian/Ubuntu: sudo apt install adb"
+    [[ "$(adb get-state 2>/dev/null)" == device ]] \
+      || die "No UNO Q on USB. Plug in the USB-C cable and give it up to a minute after power-on (check: adb devices)"
+  fi
+}
+
+find_cli() {
+  if [[ -n "${ARDUINO_CLI:-}" && -x "$ARDUINO_CLI" ]]; then echo "$ARDUINO_CLI"; return; fi
+  if command -v arduino-cli >/dev/null; then command -v arduino-cli; return; fi
+  local c
+  for c in "$REPO"/../arduino-ide_*/resources/app/lib/backend/resources/arduino-cli \
+           "$HOME"/Applications/arduino-ide_*/resources/app/lib/backend/resources/arduino-cli; do
+    [[ -x "$c" ]] && { realpath "$c"; return; }
+  done
+  return 1
+}
+
+# Where sketches are built and flashed:
+#   board   App Lab on the board builds and flashes the sketch when the app starts (the normal way).
+#   laptop  This laptop builds with its arduino:zephyr core and uploads over USB (`flash`), and App
+#           Lab runs the app without its sketch.
+# Default: laptop when the board's arduino:zephyr core differs from the laptop's. Our board has 0.52,
+# but its MCU bootloader is from 1.1.0, so only 1.1.0 builds run (DI-20). Override: UNOQ_FLASH=board|laptop.
+FLASH_MODE="" BOARD_CORE="" LAPTOP_CORE=""
+resolve_flash_mode() {
+  [[ -n "$FLASH_MODE" ]] && return 0
+  if [[ -n "${UNOQ_FLASH:-}" ]]; then FLASH_MODE="$UNOQ_FLASH"; return 0; fi
+  FLASH_MODE=board
+  local cli
+  cli=$(find_cli) || return 0
+  LAPTOP_CORE=$("$cli" core list 2>/dev/null | awk '$1=="arduino:zephyr"{print $2}')
+  BOARD_CORE=$(on_board 'ls ~/.arduino15/packages/arduino/hardware/zephyr/ 2>/dev/null | sort -V | tail -1' | tr -d '\r')
+  if [[ -n "$LAPTOP_CORE" && -n "$BOARD_CORE" && "$LAPTOP_CORE" != "$BOARD_CORE" ]]; then FLASH_MODE=laptop; fi
+  return 0
+}
+has_sketch() { [[ -z "${UNOQ_NO_SKETCH:-}" && -f "$REPO/apps/$APP/sketch/sketch.ino" ]]; }
+
+# App Lab runs one app at a time: stop any other running app before starting ours.
+stop_other_apps() {
+  local ids id
+  ids=$(on_board "arduino-app-cli app list --format json" | tr -d '\r' | python3 -c '
+import base64, json, sys
+me = "user:" + sys.argv[1]
+for a in json.load(sys.stdin).get("apps", []):
+    if a.get("status") not in ("running", "starting"):
+        continue
+    raw = a.get("id", "")
+    try:   # App Lab 0.7 lists IDs base64-encoded ("dXNlcjpzZW5zb3Itc3RyZWFt" = "user:sensor-stream")
+        ident = base64.b64decode(raw + "=" * (-len(raw) % 4), validate=True).decode()
+    except Exception:
+        ident = raw
+    if ident != me:
+        print(ident)
+' "$APP" 2>/dev/null) || return 0
+  while read -r id; do
+    [[ -z "$id" ]] && continue
+    say "Stopping $id (App Lab runs one app at a time)"
+    if [[ "$id" == user:* ]]; then id="$REMOTE_APPS/${id#user:}"; fi
+    on_board "arduino-app-cli app stop $id" >/dev/null 2>&1 || true
+  done <<< "$ids"
+}
+
+# ---- commands -------------------------------------------------------------------------------
+
+cmd_help() {
+  cat <<EOF
+${B}unoq${X}: talk to the Arduino UNO Q   (app: ${B}$APP${X}, link: ${B}$(link_name)${X})
+
+  ${B}doctor${X}              check the laptop tools and the board connection
+  ${B}dev${X}                 push + restart + follow the Python logs (the everyday loop)
+  ${B}push${X}                copy apps/$APP to the board ($REMOTE_APPS/$APP)
+  ${B}start | stop | restart${X}
+  ${B}logs${X}                follow the Python output   (print, [stat] lines, errors)
+  ${B}monitor${X}             follow the sketch output   (Serial / Monitor prints)
+  ${B}ps${X} / ${B}list${X}           running apps / all apps on the board
+  ${B}shell${X}               open a shell on the board
+  ${B}autostart${X} [none]    start this app automatically at boot (none = turn off)
+  ${B}record${X} <label> [s]  record labelled CSVs for Edge Impulse (default 10 s; label 'stop' stops)
+  ${B}pull${X}                copy recordings to recordings/$APP/
+  ${B}compile${X}             compile the sketch on this laptop (fast error check, also feeds clangd)
+  ${B}flash${X}               compile on this laptop and upload the sketch to the MCU over USB
+
+Environment: UNOQ_APP=<app folder>  UNOQ_HOST=arduino@<board>.local  ARDUINO_CLI=<path>
+             UNOQ_NO_SKETCH=1 (push without the sketch: a Python-only app, nothing flashed to the MCU)
+             UNOQ_FLASH=board|laptop (who builds and flashes sketches; default: laptop when the
+               board's arduino:zephyr core differs from this laptop's)   UNOQ_PORT=/dev/ttyACM0
+EOF
+}
+
+cmd_doctor() {
+  local fail=0 cli
+  say "Laptop"
+  ok "python3 $(python3 -V 2>&1 | cut -d' ' -f2)"
+  if [[ -n "$HOST" ]]; then
+    ok "link: SSH to $HOST"
+  elif command -v adb >/dev/null; then
+    ok "adb $(adb version | awk 'NR==1{print $NF}')"
+  else
+    bad "adb not installed"; hint "sudo pacman -S android-tools    (or use SSH: export UNOQ_HOST=arduino@<board>.local)"; fail=1
+  fi
+  if cli=$(find_cli); then ok "arduino-cli for local compile: $cli"; else
+    bad "arduino-cli not found (only needed for 'compile')"; hint "set ARDUINO_CLI=/path/to/arduino-cli"; fi
+  [[ -d "$REPO/apps/$APP" ]] && ok "app folder: apps/$APP" || { bad "apps/$APP does not exist"; fail=1; }
+
+  say "Board"
+  if [[ -z "$HOST" ]] && command -v adb >/dev/null; then
+    local state; state=$(adb get-state 2>/dev/null || true)
+    if [[ "$state" != device ]]; then
+      bad "no UNO Q on USB (adb state: ${state:-none})"
+      hint "Plug in the USB-C cable; the board needs up to a minute after power-on."
+      hint "If 'adb devices' shows 'no permissions', check the udev rule for vendor 2341 in /etc/udev/rules.d/"
+      return 1
+    fi
+  elif [[ -n "$HOST" ]]; then
+    ssh "${SSH_OPTS[@]}" "$HOST" true || { bad "cannot SSH to $HOST"; hint "Same network? eduroam may block device-to-device traffic; use USB + adb then."; return 1; }
+  else
+    bad "skipped: install adb first (or set UNOQ_HOST to use SSH)"
+    return 1
+  fi
+  ok "connected: $(on_board 'hostname' | tr -d '\r') as $(on_board 'whoami' | tr -d '\r')"
+  ok "arduino-app-cli $(on_board 'arduino-app-cli version' | tr -d '\r' | head -1)"
+  local ip; ip=$(on_board "hostname -I 2>/dev/null" | tr -d '\r' | awk '{print $1}')
+  [[ -n "$ip" ]] && ok "board IP: $ip  (SSH: export UNOQ_HOST=arduino@$ip)" || hint "board has no network address (fine for USB)"
+  resolve_flash_mode
+  if [[ "$FLASH_MODE" == laptop ]]; then
+    ok "sketches: built and flashed from this laptop (board core ${BOARD_CORE:-?} ≠ laptop core ${LAPTOP_CORE:-?}, DI-20)"
+  else
+    ok "sketches: built and flashed by App Lab on the board (core ${BOARD_CORE:-?})"
+  fi
+  say "Apps running on the board"
+  on_board "$CLI_PS" | tr -d '\r' | sed 's/^/    /' >&2 || true
+  return $fail
+}
+
+cmd_push() {
+  local src="$REPO/apps/$APP" dst="$REMOTE_APPS/$APP"
+  [[ -f "$src/app.yaml" ]] || die "apps/$APP/app.yaml not found"
+  need_board
+  resolve_flash_mode
+  local skip_sketch=""
+  [[ -n "${UNOQ_NO_SKETCH:-}" || "$FLASH_MODE" == laptop ]] && skip_sketch=1
+  say "Pushing apps/$APP → $(link_name):$dst"
+  [[ "$FLASH_MODE" == laptop ]] && has_sketch && hint "sketch not pushed: it's flashed from this laptop on start/restart/flash"
+  # Replace the code folders so deleted files disappear; keep data/ (recordings) and .cache/.
+  on_board "mkdir -p $dst && rm -rf $dst/python $dst/sketch"
+  if [[ -n "$HOST" ]]; then
+    tar -C "$REPO/apps" --exclude='.cache' --exclude='data' --exclude='__pycache__' ${skip_sketch:+--exclude=sketch} -czf - "$APP" \
+      | ssh "${SSH_OPTS[@]}" "$HOST" "tar -C $REMOTE_APPS -xzf - --no-same-owner"
+  else
+    local item
+    for item in "$src"/*; do
+      case "$(basename "$item")" in data|.cache|__pycache__) continue ;; esac
+      [[ -n "$skip_sketch" && "$(basename "$item")" == sketch ]] && continue
+      adb push "$item" "$dst/" >/dev/null
+    done
+    on_board "chown -R arduino:arduino $dst 2>/dev/null; true" || true
+  fi
+  ok "pushed"
+}
+
+# start | restart: flash the sketch from the laptop first when needed, then let App Lab run the app.
+start_app() {
+  need_board
+  resolve_flash_mode
+  stop_other_apps
+  local laptop_flash=""
+  if [[ "$FLASH_MODE" == laptop ]] && has_sketch; then
+    laptop_flash=1
+    hint "board core ${BOARD_CORE:-?} ≠ laptop core ${LAPTOP_CORE:-?}: the sketch is flashed from this laptop (DI-20)"
+    on_board "rm -rf $APP_PATH/sketch"    # so App Lab doesn't try to build it with the board's core
+  elif has_sketch; then
+    hint "App Lab builds and flashes the sketch on the board (~1 min)"
+  fi
+  if [[ "$1" == start ]]; then say "Starting $APP"; else say "Restarting $APP"; fi
+  on_board "arduino-app-cli app $1 $APP_PATH $CLI_VERBOSE" 2>&1 | "${PRETTY[@]}" --tag APP --no-log
+  # Flash after the Python side is up, so it also receives the sketch's start-up messages.
+  [[ -n "$laptop_flash" ]] && cmd_flash
+  return 0
+}
+cmd_start()   { start_app start; }
+cmd_restart() { start_app restart; }
+
+cmd_flash() {
+  local cli sk="$REPO/apps/$APP/sketch" port out rc=0
+  cli=$(find_cli) || die "arduino-cli not found; set ARDUINO_CLI=/path/to/arduino-cli"
+  has_sketch || die "apps/$APP has no sketch"
+  [[ -z "$HOST" ]] || die "flash uploads over USB: plug the board into this laptop and unset UNOQ_HOST"
+  need_board
+  cmd_compile
+  port="${UNOQ_PORT:-}"
+  [[ -n "$port" ]] || port=$("$cli" board list --format json 2>/dev/null | python3 -c '
+import json, sys
+for p in json.load(sys.stdin).get("detected_ports", []):
+    if any(b.get("fqbn") == "arduino:zephyr:unoq" for b in p.get("matching_boards", [])):
+        print(p["port"]["address"])
+        break
+' 2>/dev/null || true)
+  [[ -n "$port" ]] || die "No UNO Q upload port found (arduino-cli board list). Set UNOQ_PORT=/dev/ttyACM0"
+  say "Flashing the MCU via $port (the bootloader is checked and only rewritten if it differs)"
+  out="$REPO/build/$APP.upload.log"
+  "$cli" upload -p "$port" --fqbn "$FQBN" --input-dir "$REPO/build/$APP" "$sk" >"$out" 2>&1 || rc=$?
+  grep -E '^Error|error:|Padding image' "$out" | sed 's/^/    /' >&2 || true
+  if [[ $rc -eq 0 ]]; then ok "sketch flashed and running (log: build/$APP.upload.log)"
+  else die "upload failed (log: build/$APP.upload.log)"; fi
+}
+cmd_stop()    { need_board; say "Stopping $APP"; on_board "arduino-app-cli app stop $APP_PATH"; ok "stopped"; }
+cmd_ps()      { need_board; on_board "$CLI_PS"; }
+cmd_autostart() {
+  need_board
+  local target="${1:-$APP_PATH}"
+  [[ "$target" == none ]] || target="$APP_PATH"
+  on_board "arduino-app-cli properties set default $target"
+  if [[ "$target" == none ]]; then ok "no app starts at boot"; else ok "$APP starts automatically at boot"; fi
+}
+cmd_list()    { need_board; on_board "arduino-app-cli app list"; }
+
+cmd_shell() {
+  need_board
+  if [[ -n "$HOST" ]]; then ssh "${SSH_OPTS[@]}" "$HOST"; else adb shell; fi
+}
+
+# Follow a stream; reconnect when it ends (for example while the app restarts). Ctrl+C quits.
+follow() {
+  local tag="$1" cmd="$2"
+  trap 'echo >&2; exit 130' INT
+  while true; do
+    on_board_tty "$cmd" 2>&1 | "${PRETTY[@]}" --tag "$tag" || true
+    printf '%s(%s stream ended; reconnecting in 2 s, Ctrl+C to quit)%s\n' "$D" "$tag" "$X" >&2
+    sleep 2
+  done
+}
+cmd_logs()    { need_board; say "Python output of $APP (Ctrl+C to stop)"; follow PY "arduino-app-cli app logs $APP_PATH --follow --tail 30"; }
+cmd_monitor() { need_board; say "Sketch output: Serial / Monitor (Ctrl+C to stop)"; follow MCU "$CLI_MONITOR"; }
+
+cmd_dev() { cmd_push; cmd_restart; cmd_logs; }
+
+cmd_record() {
+  local label="${1:-}" secs="${2:-10}"
+  [[ "$label" =~ ^[A-Za-z0-9_-]+$ ]] || die "usage: tools/unoq record <label> [seconds]   (label: letters, digits, _ or -)"
+  [[ "$secs" =~ ^[0-9]+$ ]] || die "seconds must be a whole number"
+  need_board
+  local dir="$REMOTE_APPS/$APP/data"
+  on_board "mkdir -p $dir && chmod a+rwx $dir && printf '{\"label\": \"%s\", \"seconds\": %s}\\n' $label $secs > $dir/record.json"
+  if [[ "$label" == stop ]]; then ok "asked the app to stop recording"; else
+    ok "asked the app to record '$label' for ${secs}s; watch for the [rec] lines in the logs"; fi
+}
+
+cmd_pull() {
+  need_board
+  local src="$REMOTE_APPS/$APP/data/recordings" out="$REPO/recordings/$APP" tmp
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
+  if [[ -n "$HOST" ]]; then scp -q -r "${SSH_OPTS[@]}" "$HOST:$src" "$tmp/"; else adb pull "$src" "$tmp/" >/dev/null; fi
+  [[ -d "$tmp/recordings" ]] || die "no recordings on the board yet"
+  mkdir -p "$out"
+  cp -n "$tmp"/recordings/* "$out"/ 2>/dev/null || true
+  ok "$(ls "$out" | wc -l) files in recordings/$APP/"
+  hint "Upload: Edge Impulse Studio → Data acquisition → Upload data (the CSV Wizard reads the 'timestamp' column)"
+}
+
+cmd_compile() {
+  local cli sk="$REPO/apps/$APP/sketch"
+  cli=$(find_cli) || die "arduino-cli not found; set ARDUINO_CLI=/path/to/arduino-cli"
+  [[ -f "$sk/sketch.ino" ]] || die "apps/$APP has no sketch"
+  "$cli" core list 2>/dev/null | grep -q '^arduino:zephyr ' \
+    || die "UNO Q core missing. Install once: \"$cli\" core install arduino:zephyr"
+  say "Compiling apps/$APP/sketch for $FQBN (local check, nothing is uploaded)"
+  mkdir -p "$REPO/build"
+  local out="$REPO/build/$APP.compile.log" rc=0
+  "$cli" compile --fqbn "$FQBN" --build-path "$REPO/build/$APP" --warnings default "$sk" >"$out" 2>&1 || rc=$?
+  # Show our own diagnostics and the size summary; library warnings stay in the log file.
+  grep -v -E 'has been added from sketch project|/\.arduino15/|^ +[0-9]* *\||^\s*$|In (member )?function|In file included|^\s+from ' "$out" || true
+  [[ -f "$REPO/build/$APP/compile_commands.json" ]] && ln -sfn "$APP/compile_commands.json" "$REPO/build/compile_commands.json"
+  if [[ $rc -eq 0 ]]; then ok "compiles (full log: build/$APP.compile.log)"; else die "compile failed (full log: build/$APP.compile.log)"; fi
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  help|-h|--help) cmd_help ;;
+  doctor|push|start|stop|restart|ps|list|shell|logs|monitor|dev|pull|compile|flash) "cmd_$cmd" ;;
+  autostart) cmd_autostart "$@" ;;
+  record) cmd_record "$@" ;;
+  *) cmd_help; exit 1 ;;
+esac

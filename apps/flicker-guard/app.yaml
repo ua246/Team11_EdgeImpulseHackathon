@@ -1,0 +1,9 @@
+name: Flicker Guard
+icon: ⚡
+description: "Team 11 FlickerGuard: an Edge Impulse model on the UNO Q checks whether fast flickering light (3-30 Hz) is present, from the Modulino Light. Also records readings for training."
+bricks:
+  - arduino:motion_detection:
+      variables:
+        # Our Edge Impulse model (Linux aarch64 .eim), copied to the board by `tools/ei/ei.py deploy` (to do;
+        # until then this path holds a copy of the bundled up/down-wave model as a placeholder).
+        EI_MOTION_DETECTION_MODEL: /home/arduino/.arduino-bricks/ei-models/flicker-guard.eim

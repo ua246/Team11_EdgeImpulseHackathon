@@ -1,0 +1,3 @@
+name: Light Test
+icon: 💡
+description: "Team 11: how well does the Modulino Light read flicker? Flashes a test LED at 1-35 Hz into the sensor, compares what it sees with the 40 readings/s + 25 ms averaging model, prints PASS/PARTIAL/FAIL, then a live readout."

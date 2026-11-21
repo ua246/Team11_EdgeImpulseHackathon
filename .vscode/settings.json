@@ -1,0 +1,23 @@
+{
+  // Which app folder under apps/ the UNO Q tasks use, and how to reach the board:
+  // leave unoq.host empty for USB (adb), or set it to "arduino@<board-name>.local" for SSH.
+  "unoq.app": "sensor-stream",
+  "unoq.host": "",
+
+  "files.associations": { "*.ino": "cpp" },
+
+  // C++ (sketch): clangd reads build/compile_commands.json, written by the
+  // "UNO Q: compile check (laptop)" task. Run that task once after cloning.
+  "clangd.arguments": [
+    "--query-driver=${env:HOME}/.arduino15/packages/zephyr/tools/**/bin/arm-zephyr-eabi-g*",
+    "--header-insertion=never"
+  ],
+
+  // Python (board side): editor stubs for arduino.app_utils, which only exists on the board.
+  "python.analysis.extraPaths": ["tools/stubs"],
+  "python.autoComplete.extraPaths": ["tools/stubs"],
+
+  "search.exclude": { "build/**": true, "logs/**": true, "recordings/**": true },
+  "files.watcherExclude": { "**/build/**": true },
+  "terminal.integrated.scrollback": 20000
+}
