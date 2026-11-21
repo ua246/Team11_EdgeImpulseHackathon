@@ -28,6 +28,9 @@ pitch and the Q&A.
 | [DI-16](#di-16-camera-instead-of-the-light-sensor) | Camera instead of the light sensor (Raspberry Pi camera / Pi 5) | Sensing | Medium | Resolved: not usable |
 | [DI-17](#di-17-pi-5--camera-module-3-as-a-camera-front-end-for-the-uno-q) | Pi 5 + Camera Module 3 as a camera front-end for the UNO Q | Architecture | Medium | Open |
 | [DI-18](#di-18-screens-hidden-fast-flicker-and-viewing-distance) | Screens: hidden fast flicker and viewing distance | Sensing | Medium | Open |
+| [DI-19](#di-19-our-board-runs-app-lab-07--zephyr-core-052) | Our board runs App Lab 0.7 / Zephyr core 0.52 | Tooling | High | Mitigated |
+| [DI-20](#di-20-sketch-upload-to-the-mcu-fails) | Sketch upload to the MCU fails | Firmware | High | Mitigated |
+| [DI-21](#di-21-camera-results-on-the-real-board) | Camera results on the real board | Sensing | Medium | Open |
 
 ---
 
@@ -170,6 +173,25 @@ in hour one. The objective test is `apps/detector-test` (rig: `hardware/detector
 flashes a test LED at 1–60 Hz into the module and grades it PASS / PARTIAL / FAIL, with the usable
 frequency range and hints. If its detector is IR-only (dark lens), it may barely respond to LED or screen light;
 then look for a phototransistor or photodiode instead.
+
+**Update (first hardware test).** The team's "heart beat sensor" is a **MAX30102/MAX30105
+module** (I2C, part ID 0x15), wired to **A4/A5 (`Wire2`)**. `Wire2` needs board package 1.1.0
+(DI-20). It's tested with `apps/hr-test`:
+- **It works:** about 98 samples/s. IR level is ~400 in open air and ~105,000 (41% of range) with a
+  fingertip. Pulse strength (perfusion index) is 1.6–2.3%; the SpO2 estimate is 94–98% (uncalibrated).
+- **The heart rate isn't reliable yet.** Finger movement and pressure changes (dips 2–4× the pulse,
+  and slow drift) swamp the beats. The cleanest beats give about 75 bpm, but the intervals vary from
+  0.5 to 1.0 s. Plots: `recordings/hr-test/hrtest.20251210-181516.*.png`.
+- **Fix:** strap the fingertip to the sensor (elastic band, velcro, the arm sleeve) at constant
+  light pressure; check against a reference pulse; band-pass filter plus artifact rejection in
+  the analysis.
+- **It is digital with ambient-light cancellation, so it can't be the fast flicker detector
+  (DI-01 option A).** Use a bare phototransistor (Q2/R4 in the test rig) for that.
+  **Confirmed by `apps/max-strobe-test`:** at 400 samples/s in front of the flicker page at 5, 10,
+  18 and 25 Hz (white and red), flicker was detected in 0 of 5 steps with the LED on and with it
+  off (SNR 0.5–2.2). The signal level didn't change and the ALC overflow flag never tripped.
+- **Earlier runs read a frozen 110,492 / 123,402** until the sketch reset the sensor. Always flash
+  a fresh sketch before trusting the numbers.
 
 **Gotchas for using it as a flicker detector:**
 - **Cover or disconnect the module's own LED,** or its light swamps the room light.
@@ -445,6 +467,115 @@ most LED strobes stay on long enough. If it matters:
 **Next step.** Measure the brightness swing with the flicker page on a laptop and a TV at 0.5, 1, 2
 and 3 m, in a dim and a lit room, with and without the tube. The `swing NN%` value in the `[stat]`
 line for `LIGHT` and `HB` shows it directly. Set the alert threshold from that data.
+
+---
+
+## DI-19 Our board runs App Lab 0.7 / Zephyr core 0.52
+**Status:** Mitigated · **Severity:** High · **Logged:** 2026-11-21
+
+Found on the real board (`uno-q`): `arduino-app-cli` 0.7.0, `arduino:zephyr` 0.52.0, Python
+container `python-apps-base:0.5.0` (Python 3.13, OpenCV 4.12, numpy). The board is offline (no
+Wi-Fi). The tools were written against the 0.14 docs. Differences and fixes:
+- **No `app ps`, `--verbose` or top-level `monitor`** (it's `app monitor`). `tools/unoq` now
+  detects the version and uses full app paths.
+- **The bundled Bridge library (0.2.2) needs MsgPack 0.4.2, DebugLog 0.8.4, ArxContainer 0.7.0 and
+  ArxTypeTraits 0.3.2**, which aren't on the board and can't be downloaded offline. They were
+  copied from the laptop's `~/.arduino15/internal/` to the board's (same folder names) with
+  `adb push`. Sketches must list them in `sketch.yaml` in the **plain** form `- MsgPack (0.4.2)`:
+  0.7 rejects `- dependency: …`.
+- **`adb shell` sets `TMPDIR=/data/local/tmp`** (an Android path that doesn't exist here), so
+  builds fail. `tools/unoq` exports `TMPDIR=/tmp`.
+- **App Lab only passes the `/dev/video*` devices that exist when the app starts** into the
+  container, so the camera must be plugged in first. Inside the container, OpenCV opens V4L2
+  devices by **number**, not path. `video0`/`video1` are the board's video encoder/decoder.
+- **The `arduino` user's password has never been set** ("password must be changed"). `cron` jobs
+  are refused, and `sudo` and SSH need it. Set it once: `adb shell` → `passwd`.
+- **Option:** connect the board to Wi-Fi and run `arduino-app-cli system update` to get current
+  versions. That needs internet and the password.
+
+---
+
+## DI-20 Sketch upload to the MCU fails
+**Status:** Mitigated (root cause found) · **Severity:** High · **Logged:** 2026-11-21
+
+> **Root cause:** a version mismatch, not a faulty chip.
+> - **The chip's bootloader is from board package 1.1.0.** It runs Zephyr v4.4.2 and is
+>   byte-identical to the 1.1.0 package's bootloader image.
+> - **The board's App Lab still builds and flashes with package 0.52,** which targets the older
+>   Zephyr v4.2.0 bootloader, flashes with the wrong halt sequence, and writes sketches to
+>   0x080F0000 instead of 1.1.0's 0x08100000.
+>
+> **Read-only diagnostic** (`openocd` on the board): SWD works; no lockup; CFSR/HFSR = 0; flash
+> controller error-free; RDP 0; TrustZone off; no write protection.
+>
+> **Working route:** build the sketch **on the laptop** with package 1.1.0 and upload it with the
+> official 1.1.0 procedure over USB:
+> `arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:zephyr:unoq --input-dir build/<app> apps/<app>/sketch`.
+> Run the Python side as a Python-only App Lab app (`UNOQ_NO_SKETCH=1 tools/unoq push`).
+> Verified with `hr-test`: 100 samples/s reached Python over the Bridge (router 0.5.3 ↔ Bridge
+> library 0.4.4).
+>
+> **Permanent fix:** update the board's software online (`arduino-app-cli system update`, needs the
+> password and Wi-Fi), so App Lab builds with a package that matches the bootloader.
+
+Every sketch upload from App Lab compiles, then fails in OpenOCD: "clearing lockup after double
+fault / error waiting for target flash write algorithm / block write failed … at offset
+0x000f0000". It fails the same way after a fresh boot. **No sketch can run until this is fixed**,
+including `sensor-stream`, `detector-test` and the camera-test LED sweep.
+
+Python-only apps work (`UNOQ_NO_SKETCH=1 tools/unoq push`).
+
+**Reported fixes** (forum, one confirmation each, all need the password from DI-19, and some reports
+mention side effects):
+1. Re-run the board's bootloader service: `sudo systemctl start arduino-burn-bootloader.service`.
+   It's skipped now because `~/.local/share/arduino-app-cli/bootloader_burned.flag` exists.
+2. `arduino-cli burn-bootloader -b arduino:zephyr:unoq -P jlink` on the board.
+3. Reflash the board image with `arduino-flasher-cli`. This wipes the board and downloads about
+   2.4 GB.
+
+**Decide as a team** before trying. Back up `~/ArduinoApps` first.
+
+**Update (later the same day):**
+- **The flash write itself can be made to work.** The board's `flash_sketch.cfg` and
+  `flash_bootloader.cfg` both do `reset` then `halt`, which halts *after* the bootloader has started
+  running; the flash routine then crashes. A copy with `reset halt` (halt at the reset vector)
+  wrote the sketch to 0x080F0000 cleanly:
+  `remoteocd upload <sketch>.elf-zsk.bin -f flash_sketch_resethalt.cfg` (run on the board with
+  `TMPDIR=/tmp`). The bootloader area is not touched.
+- **But the sketch still never talks to Linux.** No Bridge messages reach `arduino-router`; there's
+  only one burst of unreadable bytes at reset. That happened with "Wait for Linux" and with
+  "Immediate" startup (`wait_linux_boot=no`).
+- **The MCU is always found at pc 0x08018326,** and the RAM-load config (`flash_mode=ram`) reads a
+  buffer address of 0. Both suggest the bootloader on the MCU is stuck or mismatched.
+- **`arduino-app-cli app monitor` panics with "not implemented" in 0.7.0,** so MCU prints can't be
+  read that way.
+
+**Most likely fix: bring the board's software up to date.** Set the password, connect the board to
+Wi-Fi, run `arduino-app-cli system update`. Failing that, reflash the board image. Either way, re-burn
+the bootloader afterwards.
+
+---
+
+## DI-21 Camera results on the real board
+**Status:** Open · **Severity:** Medium · **Logged:** 2026-11-21
+
+First run of `apps/camera-test` on the board, camera-only (no LED sweep, see DI-20). Report:
+`recordings/camera-test/camtest.20251210-165956.report.txt` (board clock is unsynced).
+- **The camera is "HHWei Technology Web Camera HHW006"** (USB ID 1c45:6200), 320×240 YUYV.
+- **24.9 fps measured**, although the driver claims 30. Jitter 2 ms, no drops. Flicker frequency is
+  only trustworthy up to **about 12 Hz**, and **25 Hz flicker looks like a slow ~0.1 Hz drift**.
+- **Exposure can't be locked through OpenCV:** brightness at "20 ms" vs "2 ms" was 72 vs 71. Auto
+  exposure is probably still on, and its "auto priority" mode likely explains the drop to 25 fps.
+- **The live readout didn't show the known 5/10 Hz flicker page:** it read 0.3–0.6 Hz throughout.
+  Likely cause: slow auto-exposure drift dominates the 2 s spectrum, because the analysis doesn't
+  remove trends. Raw frame data wasn't saved, so this can't be re-checked.
+
+**Next:**
+1. Set the camera controls directly with V4L2 ioctls from Python: manual exposure, auto-priority
+   off, power-line filter off. That needs no `v4l2-ctl`.
+2. Detrend before the FFT, and search from 1 Hz up.
+3. Save the raw zone brightness during the live phase.
+4. Run again.
 
 ---
 

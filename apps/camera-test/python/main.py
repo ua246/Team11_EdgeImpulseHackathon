@@ -20,6 +20,7 @@ real sources: the flicker page, a phone strobe, a TV. Restart the app to re-run 
 
 import glob
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -49,16 +50,53 @@ LUMA = np.array([0.114, 0.587, 0.299], dtype=np.float32)   # OpenCV frames are B
 
 CAP = None
 FPS_EST = float(FPS_REQ)
+_report = None
+_report_lines = 0
+REPORT_MAX_LINES = 400             # the test report plus a few minutes of live readout
+
+
+def keep(line):
+    """Also write the line to data/recordings/camtest.<time>.report.txt (for runs away from the laptop)."""
+    global _report, _report_lines
+    if _report_lines >= REPORT_MAX_LINES:
+        return
+    try:
+        if _report is None:
+            REC_DIR.mkdir(parents=True, exist_ok=True)
+            _report = open(REC_DIR / f"camtest.{STAMP}.report.txt", "a")
+        _report.write(f"{time.strftime('%H:%M:%S')} {line}\n")
+        _report.flush()
+        _report_lines += 1
+    except OSError:
+        pass
 
 
 def say(msg=""):
-    print(f"[test] {msg}", flush=True)
+    line = f"[test] {msg}"
+    print(line, flush=True)
+    keep(line)
+
+
+def cam(msg):
+    line = f"[cam] {msg}"
+    print(line, flush=True)
+    keep(line)
 
 
 # ---- test LED (sketch) ---------------------------------------------------------------------------
 
+LED_OK = True                      # False when the sketch isn't running (e.g. pushed with UNOQ_NO_SKETCH=1)
+
+
 def led(period_us=0, on_us=0):
-    Bridge.call("led", int(period_us), int(on_us), timeout=5)
+    global LED_OK
+    if not LED_OK:
+        return
+    try:
+        Bridge.call("led", int(period_us), int(on_us), timeout=5)
+    except Exception as e:  # no sketch, or the MCU isn't answering
+        LED_OK = False
+        say(f"  ! test LED not available ({e.__class__.__name__}): the LED steps will be skipped")
 
 
 def led_square(f_hz):
@@ -68,15 +106,33 @@ def led_square(f_hz):
 
 # ---- camera ----------------------------------------------------------------------------------------
 
+def video_index(path):
+    m = re.search(r"video(\d+)$", os.path.realpath(path))
+    return int(m.group(1)) if m else None
+
+
+def device_name(path):
+    try:
+        return Path(f"/sys/class/video4linux/video{video_index(path)}/name").read_text().strip()
+    except OSError:
+        return ""
+
+
+def open_capture(path):
+    """Open a V4L2 device. The OpenCV build in App Lab's container opens V4L2 devices by number only."""
+    idx = video_index(path)
+    return cv2.VideoCapture(idx if idx is not None else path, cv2.CAP_V4L2)
+
+
 def find_camera():
-    links = sorted(glob.glob("/dev/v4l/by-id/*-video-index0"))   # USB cameras have stable links
-    if links:
-        return links[0]
-    for i in range(10):
-        path = f"/dev/video{i}"
-        if not os.path.exists(path):
+    # Stable USB links exist on the host; inside App Lab's container only /dev/videoN is mapped,
+    # and only the devices present when the app started.
+    candidates = sorted(glob.glob("/dev/v4l/by-id/*-video-index0"))
+    candidates += sorted(glob.glob("/dev/video*"), key=lambda p: video_index(p) or 0)
+    for path in candidates:
+        if "venus" in device_name(path):      # the UNO Q's video encoder/decoder, not a camera
             continue
-        cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+        cap = open_capture(path)
         ok = cap.isOpened() and cap.read()[0]
         cap.release()
         if ok:
@@ -90,7 +146,7 @@ def fourcc_str(v):
 
 
 def open_camera(path):
-    cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+    cap = open_capture(path)
     if not cap.isOpened():
         raise RuntimeError(f"cannot open {path}")
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*FOURCC))
@@ -226,7 +282,7 @@ def run():
         say("  → On the board shell, `ls /dev/v4l/by-id/` should list it.")
         return
     CAP = cap = open_camera(path)
-    say(f"  {path}")
+    say(f"  {path} ({device_name(path) or 'unknown device'})")
     say(f"  {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))} "
         f"{fourcc_str(cap.get(cv2.CAP_PROP_FOURCC))}, driver reports {cap.get(cv2.CAP_PROP_FPS):.0f} fps")
 
@@ -254,6 +310,18 @@ def run():
         return
     FPS_EST, jitter, drops = frame_timing(t_tim)
     say(f"  {FPS_EST:.1f} fps, jitter {jitter:.1f} ms, {drops} dropped of {len(t_tim)}")
+
+    if not LED_OK:
+        say("4/6 and 5/6 skipped: no test LED (the sketch isn't running)")
+        say("─" * 72)
+        say(f"Frequency: at {FPS_EST:.1f} fps the camera can only read flicker up to {FPS_EST / 2:.1f} Hz.")
+        verdict = "PARTIAL" if FPS_EST >= 15 else "FAIL"
+        say(f"VERDICT camera: {verdict}: camera works at {FPS_EST:.1f} fps, exposure lock "
+            f"{'works' if ctl['works'] else 'NOT available'}; LED flicker sweep not run")
+        say("  → Check flicker by hand in the live readout below: flicker page at 5 / 10 / 25 Hz, or a phone strobe.")
+        say(f"Report: {REC_DIR}/camtest.{STAMP}.report.txt · copy with: UNOQ_APP=camera-test tools/unoq pull")
+        say("Live readout starts now. Point the camera at a flicker source.")
+        return
 
     say("4/6 finding the LED …")
     led(0, 0)
@@ -348,7 +416,7 @@ def live_step():
     while _buf and _buf[-1][0] - _buf[0][0] > LIVE_WINDOW_S:
         _buf.popleft()
     if len(_buf) < 10:
-        print("[cam] waiting for frames …", flush=True)
+        cam("waiting for frames …")
         return
     T = np.array([b[0] for b in _buf])
     Z = np.array([b[1] for b in _buf])
@@ -358,13 +426,13 @@ def live_step():
     flashing = ((hi - lo) >= ZONE_MIN_LEVELS) & ((hi - lo) / np.maximum(hi, 1) >= 0.10)
     n = int(flashing.sum())
     if n == 0:
-        print(f"[cam] {fps:4.1f} fps │ no flashing", flush=True)
+        cam(f"{fps:4.1f} fps │ no flashing")
         return
     xu, fs = uniform(T, Z[:, flashing].mean(axis=1))
     f, _ = dominant(xu, fs)
-    print(f"[cam] {fps:4.1f} fps │ flashing {100 * n / flashing.size:3.0f}% of view ({n}/{flashing.size} zones) │ "
-          f"~{f:4.1f} Hz (reliable ≤ {fps / 2:.0f} Hz) │ swing {swing(xu):3.0f}% │ "
-          f"red {100 * float(R[:, flashing].mean()):3.0f}%", flush=True)
+    cam(f"{fps:4.1f} fps │ flashing {100 * n / flashing.size:3.0f}% of view ({n}/{flashing.size} zones) │ "
+        f"~{f:4.1f} Hz (reliable ≤ {fps / 2:.0f} Hz) │ swing {swing(xu):3.0f}% │ "
+        f"red {100 * float(R[:, flashing].mean()):3.0f}%")
 
 
 _started = False

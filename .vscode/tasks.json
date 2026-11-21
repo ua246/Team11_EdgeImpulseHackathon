@@ -72,6 +72,13 @@
       "problemMatcher": { "base": "$gcc", "fileLocation": "absolute" }
     },
     {
+      "label": "UNO Q: flash sketch (laptop → MCU)",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/unoq flash",
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true, "showReuseMessage": false },
+      "problemMatcher": { "base": "$gcc", "fileLocation": "absolute" }
+    },
+    {
       "label": "UNO Q: doctor",
       "type": "shell",
       "command": "${workspaceFolder}/tools/unoq doctor",

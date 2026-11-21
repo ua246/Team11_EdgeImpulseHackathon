@@ -18,9 +18,11 @@ camera is worth using as a *context* sensor next to the fast light detector (DI-
 
 - **Camera:** plugged into the UNO Q's USB-C hub. A powered hub is best; the camera draws 250 mA.
   Keep its ring light **off**.
-- **Test LED:** the test LED D1 from the [detector test rig](../../hardware/detector-test/)
+- **Test LED:** the test LED D1 from the [test rig](../../hardware/detector-test/)
   (D3 → R2 → Q1 → D1). Point the camera at D1 from 10–30 cm with the tube removed, or at a white
   card that D1 lights.
+- **Schematic:** the "Camera test setup" block in that KiCad project shows the hub, camera and
+  power bank wiring.
 
 > **Safety:** the LED flashes at 1–30 Hz. Keep it shielded from people nearby, and keep anyone
 > photosensitive away.
