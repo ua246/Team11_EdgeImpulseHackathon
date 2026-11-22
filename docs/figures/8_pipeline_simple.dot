@@ -1,0 +1,24 @@
+// FlashGuard: the simple pipeline for slides (details: 7_flowchart.dot).
+// Render: dot -Tsvg 8_pipeline_simple.dot -o 8_pipeline_simple.svg ; dot -Tpng -Gdpi=200 8_pipeline_simple.dot -o 8_pipeline_simple.png
+digraph Pipeline {
+  graph [rankdir=LR, fontname="Noto Sans", pad=0.4, nodesep=0.4, ranksep=0.55, labelloc=b, fontsize=15, fontcolor="#555555",
+         label=<<br/>Everything runs on the Arduino UNO Q, offline · two Edge Impulse models · nothing on the device flashes>];
+  node  [fontname="Noto Sans", shape=box, style="rounded,filled", penwidth=2.2, margin="0.22,0.16", width=2.2, height=1.25, fontsize=19];
+  edge  [color="#666666", penwidth=2.2, arrowsize=1.1, fontname="Noto Sans", fontsize=13, fontcolor="#555555"];
+
+  sense  [fillcolor="#f2f2f2", color="#9a9a9a",
+          label=<<b>SENSE</b><br/><font point-size="13">light · movement · pulse</font>>];
+  detect [fillcolor="#e6dcf6", color="#7b52b9",
+          label=<<b>DETECT FLICKER</b><br/><font point-size="13">Edge Impulse model<br/>97% accurate</font>>];
+  warn   [fillcolor="#ffe3cc", color="#e07b39",
+          label=<<b>WARN WEARER</b><br/><font point-size="13">LED warning<br/>“cover one eye”</font>>];
+  watch  [fillcolor="#fff2cf", color="#d4a017",
+          label=<<b>WATCH 5 MIN</b><br/><font point-size="13">seizure-movement model<br/>+ heart rate</font>>];
+  alarm  [fillcolor="#f7c4bd", color="#c0392b",
+          label=<<b>ALERT CARER</b><br/><font point-size="13">buzzer + SOS</font>>];
+
+  sense -> detect;
+  detect -> warn  [label="flashing light"];
+  warn -> watch;
+  watch -> alarm  [label="seizure-like\nmovement"];
+}

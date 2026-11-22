@@ -13,7 +13,13 @@
 // 3. Shows the alert state on the UNO Q's LED matrix. Python calls show(state, value) (Bridge.call);
 //    static icons only, changing at most once a second (nothing on the device flashes: spec N7).
 //    0 monitoring · 1 flicker exposure · 2 watch window (value = time-left bar, 0-13 columns)
-//    3 seizure suspected (value = seconds to the alarm) · 4 carer alarm
+//    3 seizure suspected (value = seconds to the alarm) · 4 carer alarm · 5 heart rate elevated
+// 4. Heart rate from a MAX30102 (the teammate's beat detector from apps/FlickerGuard_IDE_Pulse,
+//    ported to register access): infrared at 100 samples/s, BPM = median of 5 beat intervals.
+//    Searched on Wire (header SDA/SCL, D20/D21), Wire2 (A4/A5) and Wire1 (Qwiic).
+//   notify("hr", bpm_steady, bpm_any, ir, quality)   once a second
+//      quality: 0 no fingertip · 1 saturated · 2 settling / not steady · 3 steady (bpm_steady valid)
+// 5. Modulino Buzzer (I2C 0x1E, on any bus): Python calls buzz(freq_hz, ms) (Bridge.call).
 // About 36 readings/s (DI-01). The sensor's registers are used directly, because the Modulino
 // library's update() blocks for 50-150 ms (DI-02).
 //
@@ -53,6 +59,9 @@ const char* const ICON_EXPOSURE[MX_H] = {  // warning triangle with "!"
 const char* const ICON_WATCH[MX_H] = {     // open eye; row 7 = time left in the watch window
   "....#####....", "..##.....##..", ".#....#....#.", "#....###....#",
   ".#....#....#.", "..##.....##..", "....#####....", "............."};
+const char* const ICON_HEART[MX_H] = {     // heart: heart rate elevated
+  ".............", "...##...##...", "..####.####..", "..#########..",
+  "...#######...", "....#####....", ".....###.....", "......#......"};
 const char* const ICON_ALARM[MX_H] = {     // SOS
   "#############", ".............", ".###.###.###.", ".#...#.#.#...",
   ".###.#.#.###.", "...#.#.#...#.", ".###.###.###.", "#############"};
@@ -95,6 +104,7 @@ int showStatus(int state, int value) {
       else mxDigit(value, 4);
       break;
     case 4: mxArt(ICON_ALARM); break;
+    case 5: mxArt(ICON_HEART); break;
     default: mxArt(ICON_MONITOR); break;
   }
   matrixGrayscaleWrite(mx);
@@ -203,6 +213,189 @@ void setGain(uint8_t code) {
   ltrWrite(LTR_GAIN, gainCode);   // takes effect from the next reading
 }
 
+// ---- Heart rate: MAX30102 at 0x57 -------------------------------------------------------------------
+const uint8_t HR_ADDR = 0x57;
+const uint32_t HR_MIN_IR = 5000, HR_MAX_IR = 260000;   // fingertip present / saturated (teammate's limits)
+const uint16_t HR_RATE = 100;                          // samples/s
+const uint8_t HR_INTERVALS = 5;
+TwoWire* hrBus = nullptr;
+const char* hrBusName = "";
+bool hrOk = false;
+uint32_t hrLastPollMs = 0, hrLastRetryMs = 0, hrLastReportMs = 0, hrLastSampleMs = 0, hrIr = 0;
+
+bool busWrite(TwoWire& w, uint8_t addr, const uint8_t* buf, size_t len) {
+  w.beginTransmission(addr);
+  w.write(buf, len);
+  return w.endTransmission() == 0;
+}
+
+bool busRead(TwoWire& w, uint8_t addr, uint8_t reg, uint8_t* buf, size_t len) {
+  w.beginTransmission(addr);
+  w.write(reg);
+  if (w.endTransmission(false) != 0) return false;
+  if (w.requestFrom(addr, len) != len) return false;
+  for (size_t i = 0; i < len; i++) buf[i] = w.read();
+  return true;
+}
+
+bool hrWrite(uint8_t reg, uint8_t val) {
+  uint8_t b[2] = {reg, val};
+  return busWrite(*hrBus, HR_ADDR, b, 2);
+}
+
+bool busHas(TwoWire& w, uint8_t addr) {
+  w.beginTransmission(addr);
+  return w.endTransmission() == 0;
+}
+
+String scanBus(TwoWire& w) {
+  String s;
+  for (uint8_t a = 0x08; a < 0x78; a++)
+    if (busHas(w, a)) { s += " 0x"; s += String(a, HEX); }
+  return s.length() ? s : String(" none");
+}
+
+// --- the teammate's beat detector (FlickerGuard_IDE_Pulse.ino), unchanged apart from names ---
+uint16_t contactSamples = 0;
+uint32_t sampleNumber = 0, lastBeat = 0;
+uint16_t intervals[HR_INTERVALS] = {};
+uint8_t filled = 0, slot = 0;
+float smoothIR = 0, dcIR = 0, envelope = 0;
+bool aboveThreshold = false;
+
+void clearIntervals() {
+  filled = 0;
+  slot = 0;
+  lastBeat = 0;
+}
+
+int estimateBpm(bool requireSteady) {
+  if (!filled || sampleNumber - lastBeat > 180) return 0;
+  if (requireSteady && filled < HR_INTERVALS) return 0;
+  uint16_t sorted[HR_INTERVALS];
+  for (uint8_t i = 0; i < filled; ++i) {
+    uint8_t j = i;
+    while (j > 0 && sorted[j - 1] > intervals[i]) {
+      sorted[j] = sorted[j - 1];
+      --j;
+    }
+    sorted[j] = intervals[i];
+  }
+  const int median = (sorted[(filled - 1) / 2] + sorted[filled / 2]) / 2;
+  for (uint8_t i = 0; i < filled; ++i) {
+    if (requireSteady && abs(int(sorted[i]) - median) * 5 > median) return 0;
+  }
+  return (60 * HR_RATE + median / 2) / median;
+}
+
+void readSample(uint32_t value) {
+  hrIr = value;
+  ++sampleNumber;
+  if (value < HR_MIN_IR || value >= HR_MAX_IR) {
+    contactSamples = 0;
+    aboveThreshold = false;
+    clearIntervals();
+    return;
+  }
+  if (!contactSamples) {
+    smoothIR = dcIR = value;
+    envelope = 0;
+    aboveThreshold = false;
+  }
+  smoothIR += 0.20f * (value - smoothIR);
+  dcIR += 0.025f * (smoothIR - dcIR);
+  const float pulse = smoothIR - dcIR;
+  const float magnitude = pulse < 0 ? -pulse : pulse;
+  envelope *= 0.995f;
+  if (magnitude > envelope) envelope = magnitude;
+  const float threshold = envelope * 0.35f > 10 ? envelope * 0.35f : 10;
+  const bool beat = !aboveThreshold && pulse > threshold;
+  if (beat) aboveThreshold = true;
+  if (pulse < 0) aboveThreshold = false;
+  if (contactSamples < 2 * HR_RATE) {
+    ++contactSamples;
+    return;
+  }
+  if (lastBeat && sampleNumber - lastBeat > 180) clearIntervals();
+  if (!beat) return;
+  if (lastBeat) {
+    const uint32_t gap = sampleNumber - lastBeat;
+    if (gap < 30) return;
+    intervals[slot] = gap;
+    slot = (slot + 1) % HR_INTERVALS;
+    if (filled < HR_INTERVALS) ++filled;
+  }
+  lastBeat = sampleNumber;
+}
+// --- end of the teammate's detector ---
+
+bool hrConfigure() {
+  uint8_t id = 0;
+  if (!busRead(*hrBus, HR_ADDR, 0xFF, &id, 1) || id != 0x15) return false;   // MAX30102 part ID
+  hrWrite(0x09, 0x40);              // reset
+  delay(10);
+  hrWrite(0x08, 0x10);              // FIFO: no averaging, rollover on
+  hrWrite(0x0A, 0x27);              // ADC 4096 nA, 100 samples/s, 411 us (18-bit): as the teammate's setup()
+  hrWrite(0x0C, 0x00);              // red LED off
+  hrWrite(0x0D, 0x24);              // IR LED ~7 mA
+  hrWrite(0x09, 0x03);              // SpO2 mode (red + IR slots; only IR is used)
+  hrWrite(0x04, 0); hrWrite(0x05, 0); hrWrite(0x06, 0);   // clear FIFO pointers
+  contactSamples = 0;
+  clearIntervals();
+  return true;
+}
+
+bool hrBegin() {
+  struct { TwoWire* w; const char* name; } buses[] = {
+    {&Wire, "Wire (header SDA/SCL)"}, {&Wire2, "Wire2 (A4/A5)"}, {&Wire1, "Wire1 (Qwiic)"}};
+  for (auto& b : buses) {
+    if (b.w != &Wire1) { b.w->begin(); b.w->setClock(400000); }
+    if (!busHas(*b.w, HR_ADDR)) continue;
+    hrBus = b.w;
+    hrBusName = b.name;
+    if (hrConfigure()) return true;
+  }
+  hrBus = nullptr;
+  return false;
+}
+
+void hrPoll() {
+  uint8_t p[3];
+  if (!busRead(*hrBus, HR_ADDR, 0x04, p, 3)) { hrOk = false; info("[mcu] heart rate sensor stopped answering"); return; }
+  if (p[1]) { contactSamples = 0; clearIntervals(); }   // FIFO overflowed: samples were lost, restart
+  int n = (p[0] - p[2]) & 0x1F;
+  while (n > 0) {
+    int k = n > 5 ? 5 : n;
+    uint8_t d[30];
+    if (!busRead(*hrBus, HR_ADDR, 0x07, d, k * 6)) return;
+    for (int i = 0; i < k; i++)
+      readSample(((uint32_t)d[i * 6 + 3] << 16 | (uint32_t)d[i * 6 + 4] << 8 | d[i * 6 + 5]) & 0x3FFFF);
+    n -= k;
+  }
+  hrLastSampleMs = millis();
+}
+
+void hrReport() {
+  int quality;
+  if (hrIr < HR_MIN_IR) quality = 0;
+  else if (hrIr >= HR_MAX_IR) quality = 1;
+  else quality = estimateBpm(true) ? 3 : 2;
+  Bridge.notify("hr", estimateBpm(true), estimateBpm(false), (int)hrIr, quality);
+}
+
+// ---- Modulino Buzzer: 0x1E (the library's 0x3C / 2), command = freq_hz (uint32 LE) + ms (uint32 LE) ----
+const uint8_t BUZZER_ADDR = 0x1E;
+TwoWire* buzzBus = nullptr;
+
+int buzz(int freq, int ms) {
+  if (!buzzBus) return 0;
+  uint8_t b[8];
+  uint32_t f = freq, l = ms;
+  memcpy(&b[0], &f, 4);
+  memcpy(&b[4], &l, 4);
+  return busWrite(*buzzBus, BUZZER_ADDR, b, 8) ? 1 : 0;
+}
+
 void info(const String& s) {
   Bridge.notify("info", s);
   Monitor.println(s);
@@ -261,6 +454,15 @@ void setup() {
   lightOk = lightBegin();
   moveOk = imuBegin();
   lastMoveUs = micros();
+  hrOk = hrBegin();
+  if (busHas(Wire1, BUZZER_ADDR)) buzzBus = &Wire1;
+  else if (busHas(Wire, BUZZER_ADDR)) buzzBus = &Wire;
+  else if (busHas(Wire2, BUZZER_ADDR)) buzzBus = &Wire2;
+  Bridge.provide_safe("buzz", buzz);
+  info(String("[mcu] I2C scan: Wire1 (Qwiic):") + scanBus(Wire1) + " · Wire (D20/D21):" + scanBus(Wire) +
+       " · Wire2 (A4/A5):" + scanBus(Wire2));
+  info(String("[mcu] heart rate sensor (MAX30102): ") + (hrOk ? String("OK on ") + hrBusName : String("MISSING")) +
+       ", buzzer (Modulino Buzzer 0x1E): " + (buzzBus ? "OK" : "MISSING"));
   info(String("[mcu] flashguard booted. Modulino Light: ") + (lightOk ? "OK" : "MISSING (Qwiic cable?)") +
        ", Modulino Movement: " + (moveOk ? "OK" : "MISSING") + ". Movement model: " + EI_CLASSIFIER_PROJECT_NAME +
        " (" + EI_CLASSIFIER_LABEL_COUNT + " classes, " + EI_CLASSIFIER_FREQUENCY + " Hz, " +
@@ -269,6 +471,15 @@ void setup() {
 
 void loop() {
   uint32_t nowMs = millis(), nowUs = micros();
+
+  // Heart rate: drain the sensor's FIFO every 10 ms (it samples at 100/s on its own clock).
+  if (hrOk) {
+    if (nowMs - hrLastPollMs >= 10) { hrLastPollMs = nowMs; hrPoll(); }
+    if (nowMs - hrLastReportMs >= 1000) { hrLastReportMs = nowMs; hrReport(); }
+  } else if (nowMs - hrLastRetryMs >= 3000) {
+    hrLastRetryMs = nowMs;
+    if ((hrOk = hrBegin())) info(String("[mcu] heart rate sensor connected on ") + hrBusName);
+  }
 
   // Movement: 4 Hz sampling, classification every MOVE_EVERY samples once the window is full.
   if (moveOk) {

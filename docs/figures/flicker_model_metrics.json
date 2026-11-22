@@ -1,0 +1,82 @@
+{
+ "validation_int8": {
+  "accuracy": 1,
+  "confusion": [
+   [
+    30,
+    0
+   ],
+   [
+    0,
+    52
+   ]
+  ],
+  "report": {
+   "0": {
+    "precision": 1,
+    "recall": 1,
+    "f1-score": 1,
+    "support": 30
+   },
+   "1": {
+    "precision": 1,
+    "recall": 1,
+    "f1-score": 1,
+    "support": 52
+   },
+   "accuracy": 1,
+   "macro avg": {
+    "precision": 1,
+    "recall": 1,
+    "f1-score": 1,
+    "support": 82
+   },
+   "weighted avg": {
+    "precision": 1,
+    "recall": 1,
+    "f1-score": 1,
+    "support": 82
+   }
+  }
+ },
+ "test_int8": {
+  "accuracy": 97.02970297029702,
+  "confusion": [
+   [
+    33,
+    0,
+    3
+   ],
+   [
+    0,
+    65,
+    0
+   ]
+  ],
+  "columns": [
+   "flicker",
+   "no_flicker",
+   "uncertain"
+  ]
+ },
+ "on_device_estimate": {
+  "mcu": "cortex-m4f-80mhz",
+  "name": "Cortex-M4F 80MHz",
+  "isDefault": true,
+  "latency": 1,
+  "eon": {
+   "ramRequired": 1512,
+   "romRequired": 16864,
+   "arenaSize": 0,
+   "modelSize": 4944
+  },
+  "tflite": {
+   "ramRequired": 3235,
+   "romRequired": 37176,
+   "arenaSize": 3059,
+   "modelSize": 4944
+  },
+  "hasPerformance": true
+ },
+ "light_sensor_fs": 36.30998379336307
+}

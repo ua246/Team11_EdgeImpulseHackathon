@@ -49,6 +49,27 @@ MONITOR ──flicker alert──▶ EXPOSURE ──flicker gone──▶ WATCH 
 - **Not yet:** the wearer can't cancel the countdown (no button yet). The alarm shows on the LED
   matrix only; there's no Vibro/Buzzer output yet. See `docs/BRIEF.md`.
 
+## Heart rate and buzzer
+
+- **Heart rate:** a MAX30102 pulse sensor on the D20/D21 header (also found on A4/A5 or Qwiic). The
+  teammate's beat detector (`apps/FlickerGuard_IDE_Pulse`) runs on the MCU unchanged: infrared at
+  100 samples/s, BPM = median of 5 beat intervals, one reading per second.
+- **Elevated-rate alert** (`python/main.py`):
+  - assumes a 70 bpm resting rate, then learns it from the first 30 steady readings (kept 55–80);
+  - alerts at resting + 15 bpm, kept between **80 and 90**;
+  - the rate must stay there for **15 s of steady readings in a row**, so rest and short spikes
+    don't trigger it;
+  - clears after 15 s below threshold − 5.
+- **Buzzer** (Modulino Buzzer, I2C 0x1E):
+  - heart-rate alert: 2 short beeps, repeated every 15 s;
+  - carer alarm: 3 long beeps, repeated every 5 s;
+  - one chirp at start-up.
+- **Tests:** checked in simulation (a short spike doesn't alert; a sustained rise alerts at 15 s;
+  recovery clears it). On the board, the sensor and buzzer are detected and readings arrive.
+
+**Known issue (DI-25):** after a power cycle the MCU sketch crashes on start-up (the red LED flashes)
+and nothing reaches Python. Run `tools/unoq flash` from the laptop to start it again.
+
 ## LED matrix
 
 The UNO Q's 8 × 13 matrix shows the state, updated by Python with `Bridge.call("show", state, value)`.
@@ -61,6 +82,7 @@ All icons are static and change at most once a second, so nothing on the device 
 | Watch window | bright eye, plus a bottom bar for the time left (13 columns = 5 min) |
 | Seizure suspected | countdown digits to the carer alarm |
 | Carer alarm | SOS |
+| Heart rate elevated | heart |
 
 A self-test shows each icon for 1.5 s when the board starts sending (`LED_SELFTEST` in `main.py`).
 The matrix functions come from the UNO Q core (`matrixBegin`, `matrixGrayscaleWrite`), so no extra

@@ -55,10 +55,26 @@ MOVEMENT_ONLY_AFTER_STIMULUS = False          # True: ignore seizure-like moveme
 COUNTDOWN_S = 15             # wearer's chance to recover before the carer alarm
 SETTLED_P, SETTLED_N = 0.3, 2  # movement counts as settled after 2 classifications below 0.3
 
+# Heart rate (MAX30102; the teammate's beat detector runs on the MCU, one reading per second).
+# Resting rate assumed 65-75 bpm; the alert must not fire during rest, so it needs a sustained rise.
+HR_REST_DEFAULT = 70                 # used until the resting rate is learned
+HR_LEARN_N = 30                      # learn it from the first 30 steady readings (median, kept in 55-80)
+HR_RISE = 15                         # alert threshold = resting + 15 ...
+HR_ALERT_MIN, HR_ALERT_MAX = 80, 90  # ... kept between 80 and 90 bpm (85 for a 70 bpm rest)
+HR_SUSTAIN_S = 15                    # steady readings at/above the threshold in a row before alerting
+HR_CLEAR_S = 15                      # steady readings below threshold - 5 in a row to clear
+HR_NO_READING_CLEAR_S = 30           # no fingertip this long clears an alert
+HR_REMIND_S = 15                     # repeat the buzzer while elevated
+ALARM_REMIND_S = 5                   # repeat the buzzer during a carer alarm
+
+BUZZ_HR = [(0.0, 1800, 120), (0.3, 1800, 120)]                          # two short beeps
+BUZZ_ALARM = [(0.0, 2600, 400), (0.6, 2600, 400), (1.2, 2600, 400)]     # three long beeps
+BUZZ_TEST = [(0.0, 2000, 60)]                                           # one chirp at start-up
+
 LED_SELFTEST = True          # show every matrix icon once at start-up (1.5 s each)
-LED_NAMES = {0: "monitoring (eye)", 1: "flicker warning (triangle)", 2: "watch window (eye + time bar)",
+LED_NAMES = {5: "heart rate elevated (heart)", 0: "monitoring (eye)", 1: "flicker warning (triangle)", 2: "watch window (eye + time bar)",
              3: "seizure countdown (digits)", 4: "carer alarm (SOS)"}
-LED_SELFTEST_SEQ = [(0, 0), (1, 0), (2, 13), (2, 4), (3, 15), (3, 7), (4, 0), (0, 0)]
+LED_SELFTEST_SEQ = [(0, 0), (1, 0), (2, 13), (2, 4), (3, 15), (3, 7), (4, 0), (5, 0), (0, 0)]
 
 lock = threading.Lock()
 readings = deque(maxlen=600)          # (t_ms, r, g, b, gain_code)
@@ -67,6 +83,10 @@ files = {}
 history = deque(maxlen=3)             # last P(flicker) values
 seizure_hist = deque(maxlen=8)        # last P(Seizure) values
 moves = deque()                       # movement classifications waiting for the main loop
+hr_queue = deque()                    # heart rate readings waiting for the main loop
+hr = {"bpm": 0, "q": 0, "ir": 0, "rest_vals": [], "rest": None, "above": 0, "below": 0, "elevated": False,
+      "no_contact": 0, "last_buzz": 0.0, "last_print": 0.0, "last_q": None, "seen": False}
+buzz = {"queue": [], "ok": None, "last_alarm": 0.0}
 state = {"alert": False, "last_change_i": -10**9, "total": 0,
          "exposure_start": None, "watch_until": 0.0, "seizure": None, "countdown_until": 0.0}
 
@@ -145,6 +165,14 @@ Bridge.provide("info", on_info)
 Bridge.provide("s", on_s)
 Bridge.provide("imu", on_imu)
 Bridge.provide("m", on_m)
+
+
+def on_hr(bpm, bpm_any, ir, quality):
+    with lock:
+        hr_queue.append((int(bpm), int(bpm_any), int(ir), int(quality)))
+
+
+Bridge.provide("hr", on_hr)
 
 
 # ---- Flicker model (runner container from the motion_detection brick) ------------------------
@@ -266,6 +294,10 @@ def on_movement(probs, dsp_us, nn_us):
 
 
 def countdown_tick():
+    now = time.monotonic()
+    if state["seizure"] == "alarm" and now - buzz["last_alarm"] >= ALARM_REMIND_S:
+        buzz["last_alarm"] = now
+        buzz_pattern(BUZZ_ALARM)
     if state["seizure"] == "suspected":
         left = state["countdown_until"] - time.monotonic()
         if left <= 0:
@@ -273,8 +305,95 @@ def countdown_tick():
             print("[alert] CARER ALARM: seizure-like movement continued" +
                   (" after a flicker exposure" if sensitive() else ""), flush=True)
             log_event("carer_alarm", phase_text())
+            buzz["last_alarm"] = now
+            buzz_pattern(BUZZ_ALARM)
         elif int(left) % 5 == 0:
             print(f"[alert] carer alarm in {left:.0f} s", flush=True)
+
+
+# ---- Buzzer (sketch: buzz(freq_hz, ms)) -------------------------------------------------------------
+
+def buzz_pattern(pattern):
+    now = time.monotonic()
+    buzz["queue"] = sorted(buzz["queue"] + [(now + dt, f, ms) for dt, f, ms in pattern])
+
+
+def buzz_tick(now):
+    while buzz["queue"] and buzz["queue"][0][0] <= now:
+        _, f, ms = buzz["queue"].pop(0)
+        try:
+            ok = Bridge.call("buzz", int(f), int(ms), timeout=2)
+        except Exception as e:  # noqa: BLE001
+            ok = None
+            if buzz["ok"] is not False:
+                print(f"[warn] buzzer: call to the MCU failed ({e})", flush=True)
+        if ok == 0 and buzz["ok"] is not False:
+            print("[warn] buzzer: no Modulino Buzzer found on the I2C buses (see the [mcu] I2C scan)", flush=True)
+        buzz["ok"] = bool(ok)
+
+
+# ---- Heart rate: elevated-rate alert ----------------------------------------------------------------
+
+HR_QUALITY = {0: "place a fingertip on the sensor", 1: "signal saturated: press more lightly",
+              2: "hold still for a steady pulse", 3: "steady"}
+
+
+def hr_threshold():
+    rest = hr["rest"] if hr["rest"] is not None else HR_REST_DEFAULT
+    return min(HR_ALERT_MAX, max(HR_ALERT_MIN, rest + HR_RISE))
+
+
+def hr_update(bpm, bpm_any, ir, q):
+    now = time.monotonic()
+    hr.update(bpm=bpm, q=q, ir=ir, seen=True)
+    thr = hr_threshold()
+    if q == 3 and bpm > 0:
+        hr["no_contact"] = 0
+        if hr["rest"] is None and not hr["elevated"]:
+            hr["rest_vals"].append(bpm)
+            if len(hr["rest_vals"]) >= HR_LEARN_N:
+                hr["rest"] = int(min(80, max(55, np.median(hr["rest_vals"]))))
+                print(f"[hr] resting rate learned: {hr['rest']} bpm → alert at ≥ {hr_threshold()} bpm "
+                      f"held for {HR_SUSTAIN_S} s", flush=True)
+                log_event("hr_rest_learned", f"{hr['rest']} bpm")
+                thr = hr_threshold()
+        if bpm >= thr:
+            hr["above"] += 1
+            hr["below"] = 0
+        elif bpm < thr - 5:
+            hr["below"] += 1
+            hr["above"] = 0
+        else:
+            hr["above"] = 0                  # in the hysteresis band: not elevated, not yet clear
+    elif q in (0, 1):
+        hr["above"] = 0
+        hr["no_contact"] += 1
+    # q == 2 (settling / moving): neither confirms nor clears
+
+    if not hr["elevated"] and hr["above"] >= HR_SUSTAIN_S:
+        hr["elevated"] = True
+        hr["last_buzz"] = now
+        print(f"[alert] heart rate elevated: {bpm} bpm for {HR_SUSTAIN_S} s (resting "
+              f"{hr['rest'] or HR_REST_DEFAULT}{'' if hr['rest'] else ', assumed'}, threshold {thr})", flush=True)
+        log_event("hr_elevated", f"{bpm} bpm, threshold {thr}")
+        buzz_pattern(BUZZ_HR)
+    elif hr["elevated"] and (hr["below"] >= HR_CLEAR_S or hr["no_contact"] >= HR_NO_READING_CLEAR_S):
+        hr["elevated"] = False
+        why = f"{bpm} bpm" if hr["below"] >= HR_CLEAR_S else "no reading"
+        print(f"[hr] heart rate alert cleared ({why})", flush=True)
+        log_event("hr_normal", why)
+    elif hr["elevated"] and now - hr["last_buzz"] >= HR_REMIND_S:
+        hr["last_buzz"] = now
+        buzz_pattern(BUZZ_HR)
+
+    if now - hr["last_print"] >= 5 or q != hr["last_q"]:
+        hr["last_print"] = now
+        hr["last_q"] = q
+        rate = f"{bpm} bpm" if q == 3 else (f"~{bpm_any} bpm (unsteady)" if bpm_any else "--- bpm")
+        rest = f"rest {hr['rest']}" if hr["rest"] else f"rest {HR_REST_DEFAULT} assumed ({len(hr['rest_vals'])}/{HR_LEARN_N})"
+        print(f"[hr] {rate} · {rest} · alert ≥ {thr} for {HR_SUSTAIN_S} s"
+              f"{' (' + str(hr['above']) + ' s so far)' if hr['above'] else ''} · {HR_QUALITY.get(q, q)}"
+              f"{' · ⚠ ELEVATED' if hr['elevated'] else ''}", flush=True)
 
 
 # ---- LED matrix (sketch: show(state, value)) -------------------------------------------------------
@@ -289,6 +408,8 @@ def led_target(now):
         return 3, max(0, math.ceil(state["countdown_until"] - now))
     if state["alert"]:
         return 1, 0
+    if hr["elevated"]:
+        return 5, 0
     left = state["watch_until"] - now
     if left > 0:
         return 2, math.ceil(13 * left / WATCH_S)
@@ -323,7 +444,8 @@ def led_tick(now):
             if not started:
                 return
             led["selftest_t0"] = now
-            print("[led] self-test: each icon for 1.5 s", flush=True)
+            print("[led] self-test: each icon for 1.5 s (and one buzzer chirp)", flush=True)
+            buzz_pattern(BUZZ_TEST)
         i = int((now - led["selftest_t0"]) / 1.5)
         if i < len(LED_SELFTEST_SEQ):
             tgt = LED_SELFTEST_SEQ[i]
@@ -398,6 +520,13 @@ def loop():
     if now >= _next_led:
         _next_led = now + 0.25
         led_tick(now)
+    buzz_tick(now)
+    while True:
+        with lock:
+            item = hr_queue.popleft() if hr_queue else None
+        if item is None:
+            break
+        hr_update(*item)
     if model is not None and now >= _next_ei:
         _next_ei = now + STEP_S
         try:
@@ -432,5 +561,7 @@ print(f"[boot] flashguard · {model_note}", flush=True)
 print(f"[boot] movement model on the MCU · seizure watch {WATCH_S // 60} min after a flicker exposure "
       f"(P≥{SEIZURE_P_WATCH} x{SEIZURE_N_WATCH}); otherwise "
       + ("off" if MOVEMENT_ONLY_AFTER_STIMULUS else f"P≥{SEIZURE_P_ALWAYS} x{SEIZURE_N_ALWAYS}"), flush=True)
+print(f"[boot] heart rate: alert at resting + {HR_RISE} (kept {HR_ALERT_MIN}-{HR_ALERT_MAX} bpm; "
+      f"{HR_REST_DEFAULT} assumed until learned) held {HR_SUSTAIN_S} s · buzzer + heart icon", flush=True)
 print(f"[rec] data/recordings/{{flicker,movement,events}}.{STAMP}.csv", flush=True)
 App.run(user_loop=loop)

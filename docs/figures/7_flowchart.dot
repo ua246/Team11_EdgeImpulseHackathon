@@ -1,0 +1,73 @@
+// FlashGuard: how the current implementation works. Landscape, one row per sensor, for slides.
+// Render: dot -Tsvg 7_flowchart.dot -o 7_flowchart.svg ; dot -Tpng -Gdpi=170 7_flowchart.dot -o 7_flowchart.png
+digraph FlashGuard {
+  graph [rankdir=LR, newrank=true, fontname="Noto Sans", fontsize=24, pad=0.35, nodesep=0.55, ranksep=0.45,
+         labelloc=t, label=<<b>FlashGuard: how it works</b><br/><font point-size="15" color="#555555">Arduino UNO Q · two Edge Impulse models + a heart-rate check · everything on the board, offline</font><br/><font point-size="12" color="#777777">The LED matrix always shows the current state with static icons (nothing on the device flashes) · every alert is logged to events.csv</font><br/> >];
+  node  [fontname="Noto Sans", fontsize=13, shape=box, style="rounded,filled", fillcolor="white", color="#9a9a9a",
+         penwidth=1.3, margin="0.14,0.08"];
+  edge  [fontname="Noto Sans", fontsize=11, color="#555555", arrowsize=0.75, penwidth=1.2];
+
+  subgraph cluster_sensors {
+    label=<<b>Sensors</b>>; fontsize=15; style="rounded,dashed"; color="#bdbdbd";
+    light [label=<<b>Modulino Light</b><br/><font point-size="11">cap brim · R, G, B<br/>~36 readings/s</font>>, fillcolor="#f3f3f3"];
+    move  [label=<<b>Modulino Movement</b><br/><font point-size="11">wrist / arm<br/>accel + gyro · 4 Hz</font>>, fillcolor="#f3f3f3"];
+    heart [label=<<b>MAX30102</b><br/><font point-size="11">fingertip pulse<br/>infrared · 100 Hz</font>>, fillcolor="#f3f3f3"];
+  }
+
+  subgraph cluster_mcu {
+    label=<<b>Microcontroller</b><br/><font point-size="12">STM32U585</font>>; fontsize=15; style="rounded,filled"; fillcolor="#eef4fb"; color="#a9c6e8";
+    stream [label=<Stream readings<br/><font point-size="11">automatic gain</font>>];
+    mmodel [label=<<b>Movement model</b><br/>Edge Impulse<br/><font point-size="11">10 s window · every 2.5 s<br/>~13 ms · 6 classes</font>>, fillcolor="#d7e7f8", color="#2a6fbb", penwidth=1.8];
+    beats  [label=<Beat detector<br/><font point-size="11">BPM once a second</font>>];
+  }
+
+  subgraph cluster_linux {
+    label=<<b>Linux side</b> · Python app + Edge Impulse runner>; fontsize=15; style="rounded,filled"; fillcolor="#f5f1fb"; color="#c7b6e4";
+
+    fmodel [label=<<b>Flicker model</b><br/>Edge Impulse<br/><font point-size="11">1.77 s window every 0.5 s<br/>~30 ms · 97% on held-out test</font>>, fillcolor="#e6dcf6", color="#7b52b9", penwidth=1.8];
+    dflick [shape=diamond, style="filled", fillcolor="white", fontsize=12, margin="0.02,0.02", label=<P(flicker) ≥ 0.8<br/>2 of last 3?>];
+    expo   [label=<<b>FLICKER<br/>EXPOSURE</b><br/><font point-size="11">LED: warning ⚠</font>>, fillcolor="#ffe3cc", color="#e07b39", penwidth=2.2];
+    watch  [label=<<b>WATCH WINDOW</b> · 5 min<br/><font point-size="11">seizure check more sensitive ↓<br/>LED: eye + time bar</font>>, fillcolor="#fff2cf", color="#d4a017", penwidth=2.2];
+
+    dseiz  [shape=diamond, style="filled", fillcolor="white", fontsize=12, margin="0.02,0.02",
+            label=<P(Seizure) high?<br/><font point-size="10"><font color="#a07a00">≥ 0.6 for 5 s in the watch window</font><br/>≥ 0.8 for 10 s otherwise</font>>];
+    susp   [label=<<b>SEIZURE<br/>SUSPECTED</b><br/><font point-size="11">LED: 15 s countdown</font>>, fillcolor="#ffd9cf", color="#d35400", penwidth=2.2];
+    dsettle [shape=diamond, style="filled", fillcolor="white", fontsize=12, margin="0.02,0.02", label=<movement<br/>settles?>];
+    alarm  [label=<<b>CARER ALARM</b><br/><font point-size="11">LED: SOS<br/>buzzer: 3 long beeps / 5 s</font>>, fillcolor="#f7c4bd", color="#c0392b", penwidth=2.8];
+    cancel [label=<cancelled<br/><font point-size="11">back to monitoring</font>>, fillcolor="#eef7ee", color="#5c9c5c"];
+
+    rest   [label=<Resting rate<br/><font point-size="11">learned from 30 steady<br/>readings (70 assumed)</font>>];
+    dhr    [shape=diamond, style="filled", fillcolor="white", fontsize=12, margin="0.02,0.02",
+            label=<BPM ≥ rest + 15<br/>for 15 s?<br/><font point-size="10">(threshold 80–90)</font>>];
+    hrel   [label=<<b>HEART RATE<br/>ELEVATED</b><br/><font point-size="11">LED: heart<br/>buzzer: 2 beeps / 15 s</font>>, fillcolor="#ffd9cf", color="#d35400", penwidth=2.2];
+    dhrok  [shape=diamond, style="filled", fillcolor="white", fontsize=12, margin="0.02,0.02", label=<&lt; threshold − 5<br/>for 15 s?>];
+  }
+
+  // row 1: flicker (stimulus)
+  light -> stream -> fmodel -> dflick;
+  dflick -> expo   [label="yes"];
+  dflick -> fmodel [label="no", style=dashed, color="#9a9a9a", fontcolor="#777777"];
+  expo -> watch    [label="flicker\nstops"];
+
+  // row 2: movement (response), more sensitive during the watch window
+  move -> mmodel -> dseiz;
+  dseiz -> susp    [label="yes"];
+  susp -> dsettle;
+  dsettle -> alarm  [label="no"];
+  dsettle -> cancel [label="yes"];
+
+  // row 3: heart rate
+  heart -> beats -> rest -> dhr;
+  dhr -> hrel      [label="yes"];
+  hrel -> dhrok;
+  dhrok -> dhr     [label="yes: clear", style=dashed, color="#5c9c5c", fontcolor="#3d7a3d"];
+
+  // columns
+  {rank=same; light; move; heart;}
+  {rank=same; stream; mmodel; beats;}
+  {rank=same; fmodel; dseiz; rest;}
+  {rank=same; dflick; susp; dhr;}
+  {rank=same; expo; dsettle; hrel;}
+  {rank=same; watch; alarm; cancel; dhrok;}
+
+}

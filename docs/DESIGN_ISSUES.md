@@ -29,6 +29,7 @@ pitch and the Q&A. IDs are never reused; gaps are entries removed with DI-22.
 | [DI-22](#di-22-decision-the-modulino-light-is-the-only-light-sensor) | Decision: the Modulino Light is the only light sensor | Sensing | High | Resolved |
 | [DI-23](#di-23-running-the-edge-impulse-models-offline-on-the-uno-q) | Running the Edge Impulse models offline on the UNO Q | ML | High | Mitigated |
 | [DI-24](#di-24-the-arduino_modulino-library-stops-sketches-starting-on-our-board) | The Arduino_Modulino library stops sketches starting on our board | Firmware | High | Mitigated |
+| [DI-25](#di-25-the-sketch-crashes-after-a-power-cycle-since-the-heart-rate-start-up) | The sketch crashes after a power cycle (since the heart-rate start-up) | Firmware | High | Open |
 
 ---
 
@@ -464,6 +465,31 @@ See `apps/flashguard/sketch/sketch.ino` (`imuBegin`, `imuRead`).
 
 **Next step.** If `sensor-stream` is ever needed again, port it to the same driver. For v0.1,
 `flashguard` does the recording.
+
+---
+
+## DI-25 The sketch crashes after a power cycle (since the heart-rate start-up)
+**Status:** Open (workaround: flash from the laptop) · **Severity:** High · **Logged:** 2026-11-22
+
+**Problem.** Since the heart-rate and buzzer start-up was added to `apps/flashguard`, the MCU
+sketch runs fine when flashed from the laptop, but after a power cycle it crashes on start-up:
+- the red LED flashes;
+- Python receives 0 readings;
+- the Linux side starts normally.
+
+The LED-matrix version before it did come back fine after a power cycle.
+
+**Likely cause (not confirmed):** at power-on, `setup()` now probes three I2C buses (Wire, Wire2,
+Wire1) and scans every address while the sensors may still be powering up. The crash happens before
+the sketch can report anything.
+
+**Workaround.** Keep the board powered during the demo; after a power cycle run `tools/unoq flash`
+(~1 min).
+
+**Fix to try.**
+1. Do the heart-rate/buzzer detection a few seconds after boot, in `loop()`.
+2. Probe only 0x57 and 0x1E, and drop the full bus scan.
+3. Test with a real unplug and replug.
 
 ---
 
