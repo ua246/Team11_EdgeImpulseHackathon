@@ -4,6 +4,43 @@
 Full design: [PROJECT_SPEC.md](PROJECT_SPEC.md) · decisions and problems:
 [DESIGN_ISSUES.md](DESIGN_ISSUES.md) · board workflow: [UNOQ_DEV.md](UNOQ_DEV.md).
 
+## Update: Sun 22 Nov, morning
+
+**Both Edge Impulse models now run on the UNO Q, offline** (`apps/flicker-guard`, DI-23):
+
+| | Flicker model (stimulus) | Movement model (response) |
+|---|---|---|
+| Project | ours, 1170128 | teammate's "Wearable Movement Monitoring (More Classes)", 1170305 |
+| Runs on | Linux side, brick runner (`.eim`) | MCU, exported Arduino library |
+| Input | Modulino Light R/G/B, 1.77 s window every 0.5 s | Modulino Movement acc + gyro at 4 Hz, 10 s window every 2.5 s |
+| Result | **97.0%** on 101 held-out test windows, no false alarms | classes Running / **Seizure** / Sitting / Standing / Walking / Waving |
+| Time per classification on the board | ~30 ms | ~13 ms |
+
+**After-stimulus logic:**
+1. A flicker alert opens a **5 min watch window**.
+2. P(Seizure) ≥ 0.6 for 5 s then starts a **15 s countdown** to the carer alarm, which is cancelled
+   if the movement settles.
+3. Outside the window the rule is stricter (≥ 0.8 for 10 s).
+4. Events are logged to `events.<time>.csv`.
+
+This is tested in simulation, and each model runs on the board. **The live end-to-end test (flicker
+page → shake the Movement module) is the next step.**
+
+**Found:** the Arduino_Modulino library stops sketches starting on our board, so both Modulinos are
+now read through their registers (DI-24).
+
+**LED matrix:** shows the state with static icons: eye, warning triangle, eye + time bar, countdown,
+SOS. This confirmed that **Python → MCU calls (`Bridge.call`) work** on our board.
+
+**Still to do from the list below:** priority 1's live test; priorities 2–5. Wearer cancel and
+Vibro/Buzzer output are open.
+
+**Saved as v0.1, the first working model** (git tag `v0.1`, [RELEASE_v0.1.md](RELEASE_v0.1.md)).
+The repo is now organised around it:
+- `apps/flicker-guard` is the product, with its models pinned in `models/`;
+- `sensor-stream` and the MAX30102 app moved to `archive/`;
+- `tools/unoq` and VSCodium default to `flicker-guard`, and `tools/unoq push` installs the pinned model.
+
 ## In one paragraph
 
 A wearable that warns people with photosensitive epilepsy about seizure-provoking flicker, and
@@ -33,8 +70,8 @@ trained model**:
 |---|---|---|
 | `flicker-guard` | **The product.** Streams Modulino Light readings with auto gain, runs the Edge Impulse model every 0.5 s (P(flicker) ≥ 0.8 in 2 of 3 windows → alert), prints a rule-based baseline, records training data | Verified on the board except inference with a real flicker model (none trained yet; a placeholder model sits at the model path) |
 | `light-test` | Characterises the Modulino Light: LED-rig sweep (automatic) or screen sweep (`tools/flicker.html` → Sweep, analysed by `screen_sweep.py`), with PASS/PARTIAL/FAIL verdicts | Screen sweep **PASS**; LED rig not built yet |
-| `sensor-stream` | Streams Modulino Light + Movement; labelled CSV recording for Edge Impulse (`tools/unoq record`) | Compiles; **not yet run on the board** (DI-15). The starting point for the motion model |
-| `max30102-heart-rate` | A teammate's standalone heart-rate app | Outside the current design (DI-22); kept as is |
+| `sensor-stream` (now `archive/`) | Streams Modulino Light + Movement; labelled CSV recording for Edge Impulse (`tools/unoq record`) | Compiles; **not yet run on the board** (DI-15). The starting point for the motion model |
+| `max30102-heart-rate` (now `archive/`) | A teammate's standalone heart-rate app | Outside the current design (DI-22); kept as is |
 
 ### Edge Impulse pipeline (`tools/ei/`, see its README)
 | Step | State |
@@ -101,7 +138,7 @@ trained model**:
 - A backup video. Devpost text (spec §17), and update the spec's open items.
 
 **5. Stretch: seizure-like motion (model B).**
-- Run `sensor-stream` on the board, record acted shaking against normal activities (2 people), and
+- (Superseded: the teammate's movement model now runs in flicker-guard.) Run `sensor-stream` on the board, record acted shaking against normal activities (2 people), and
   train a second model.
 - **Open question:** whether two brick runners can run at once. The fallback is a rule on the motion
   energy.

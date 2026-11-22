@@ -3,10 +3,11 @@
 
     python3 tools/ei/ei.py info                        project, data and impulse summary
     python3 tools/ei/ei.py upload <dataset.json>       labelled windows from make_dataset.py
-    python3 tools/ei/ei.py train                       TODO (needs an Admin key): impulse, features, training
-    python3 tools/ei/ei.py deploy                      TODO: build the "Arduino UNO Q" / Linux aarch64 .eim
+    python3 tools/ei/ei.py train [cycles]              impulse + spectral features + Keras training + test accuracy
+    python3 tools/ei/ei.py deploy                      build the Linux aarch64 .eim → build/flicker-guard.eim
 
-The API key is read from $EI_API_KEY or ~/.config/flickerguard/ei-api-key (keep it out of git).
+The API key is read from $EI_API_KEY, else ~/.config/flickerguard/ei-admin-key (Admin role: needed to
+train), else ~/.config/flickerguard/ei-api-key (ingestion/deployment only). Keep keys out of git.
 """
 
 import json
@@ -26,12 +27,13 @@ MODEL_OUT = REPO / "build" / "flicker-guard.eim"
 
 def api_key():
     key = os.environ.get("EI_API_KEY")
-    if not key:
-        f = Path.home() / ".config" / "flickerguard" / "ei-api-key"
-        if not f.exists():
-            sys.exit("No API key: set EI_API_KEY or save it to ~/.config/flickerguard/ei-api-key")
-        key = f.read_text().strip()
-    return key
+    if key:
+        return key
+    for name in ("ei-admin-key", "ei-api-key"):
+        f = Path.home() / ".config" / "flickerguard" / name
+        if f.exists():
+            return f.read_text().strip()
+    sys.exit("No API key: set EI_API_KEY or save it to ~/.config/flickerguard/ei-admin-key")
 
 
 KEY = None
@@ -131,6 +133,75 @@ def cmd_upload(path, limit=None):
     return 0 if not fail else 1
 
 
+# ---- train ------------------------------------------------------------------------------------------
+
+# Must match apps/flicker-guard/python/features.py: 64 readings at 27.6 ms. 1766.4 ms would round down
+# to 63 readings, so the window is 1767 ms.
+IMPULSE = {
+    "inputBlocks": [{"id": 1, "type": "time-series", "name": "Time series", "title": "Time series data",
+                     "windowSizeMs": 1767, "windowIncreaseMs": 1767, "frequencyHz": 1000 / 27.6, "padZeros": True}],
+    "dspBlocks": [{"id": 2, "type": "spectral-analysis", "name": "Spectral features", "title": "Spectral Analysis",
+                   "axes": ["red", "green", "blue"], "input": 1, "implementationVersion": 4}],
+    "learnBlocks": [{"id": 3, "type": "keras", "name": "Classifier", "title": "Classification", "dsp": [2]}],
+}
+DSP_CONFIG = {"fft-length": "64", "filter-type": "none", "do-log": "true", "do-fft-overlap": "false",
+              "scale-axes": "1", "input-decimation-ratio": "1"}
+
+
+def wait_job(pid, job_id, what, timeout=1800):
+    t0, last = time.time(), ""
+    while time.time() - t0 < timeout:
+        job = get(f"{pid}/jobs/{job_id}/status")["job"]
+        if job.get("finished"):
+            if not job.get("finishedSuccessful"):
+                log = requests.get(f"{STUDIO}/{pid}/jobs/{job_id}/stdout", headers=H, timeout=60).text
+                raise RuntimeError(f"{what} failed:\n{log[-1500:]}")
+            print(f"  {what}: done in {time.time() - t0:.0f} s", flush=True)
+            return job
+        msg = f"  {what}: running ({time.time() - t0:.0f} s)"
+        if msg[:-5] != last:
+            last = msg[:-5]
+        time.sleep(5)
+    raise RuntimeError(f"{what}: timed out")
+
+
+def cmd_train(cycles=60):
+    pid = project_id()
+    imp = get(f"{pid}/impulse").get("impulse") or {}
+    if not imp.get("inputBlocks"):
+        post(f"{pid}/impulse", IMPULSE)
+        print("impulse created")
+    post(f"{pid}/dsp/2", {"config": DSP_CONFIG})
+    print("spectral analysis configured:", DSP_CONFIG)
+    j = post(f"{pid}/jobs/generate-features", {"dspId": 2})
+    wait_job(pid, j["id"], "generate features")
+    j = post(f"{pid}/jobs/train/keras/3", {"trainingCycles": int(cycles), "learningRate": 0.005})
+    wait_job(pid, j["id"], "train")
+    j = post(f"{pid}/jobs/evaluate", {})
+    wait_job(pid, j["id"], "test-set evaluation")
+    ev = get(f"{pid}/deployment/evaluate")
+    for res in ev.get("result", []):
+        print(f"test set, {res.get('modelType')} model: accuracy {res['accuracy']['raw']:.1f}% "
+              f"({res['totalCorrectWindowCount']['raw']}/{res['totalWindowCount']} windows)")
+        for true, row in res.get("confusionMatrix", {}).items():
+            print(f"  {true:12s} → " + ", ".join(f"{k} {v['raw']}" for k, v in row.items()))
+    return 0
+
+
+def cmd_deploy(fmt="runner-linux-aarch64"):
+    pid = project_id()
+    j = post(f"{pid}/jobs/build-ondevice-model?type={fmt}", {"engine": "tflite"})
+    wait_job(pid, j["id"], f"build {fmt}")
+    r = requests.get(f"{STUDIO}/{pid}/deployment/download", headers=H, params={"type": fmt}, timeout=300)
+    r.raise_for_status()
+    MODEL_OUT.parent.mkdir(exist_ok=True)
+    out = MODEL_OUT if fmt == "runner-linux-aarch64" else MODEL_OUT.with_name(f"flicker-guard.{fmt}.eim")
+    out.write_bytes(r.content)
+    out.chmod(0o755)
+    print(f"downloaded {out} ({len(r.content) / 1e6:.1f} MB)")
+    return 0
+
+
 def main(argv):
     if not argv:
         sys.exit(__doc__)
@@ -141,10 +212,10 @@ def main(argv):
     elif cmd == "upload":
         limit = int(argv[2]) if len(argv) > 2 else None
         return cmd_upload(argv[1], limit)
-    elif cmd in ("train", "deploy"):
-        print(f"'{cmd}' isn't written yet. Training needs an Admin API key (the current key's role is "
-              "ingestion_deployment); see docs/BRIEF.md for the plan and the settings to use.")
-        return 2
+    elif cmd == "train":
+        return cmd_train(*argv[1:2])
+    elif cmd == "deploy":
+        return cmd_deploy(*argv[1:2])
     else:
         sys.exit(__doc__)
     return 0

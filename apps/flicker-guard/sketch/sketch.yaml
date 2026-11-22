@@ -3,6 +3,8 @@ profiles:
     platforms:
       - platform: arduino:zephyr
     libraries:
+      # Edge Impulse movement model (exported Arduino library, project 1170305)
+      - dir: ../libraries/Wearable_Movement_Monitoring_More_Classes__inferencing
       # Needed by the Bridge library on boards with the older Zephyr core (0.52, App Lab 0.7);
       # newer cores bundle them.
       - MsgPack (0.4.2)

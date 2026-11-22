@@ -32,84 +32,76 @@ output side by side, all from VSCodium or one terminal command (`tools/unoq`).
 
 Run tasks with **Ctrl+Shift+P → Tasks: Run Task**.
 
-- **Restarting compiles the sketch on the board,** which takes about a minute. The first start of
-  an app also downloads containers.
+- **Sketches are built on the laptop and flashed over USB** (board package 1.1.0; the board's own
+  App Lab can't flash, DI-20). `start`, `restart` and `dev` do it automatically. A first build of
+  `flicker-guard` takes ~8 min (Edge Impulse SDK); later builds take ~1 min.
+- **`UNOQ_NO_SKETCH=1 tools/unoq restart`** restarts only Python and the model runner.
+- **`tools/unoq push` also installs a pinned model** (`apps/<app>/models/<app>.eim`) when it changed.
 - **Compile errors become clickable entries in the Problems panel.**
 - **Every output stream is also saved to `logs/`,** which is useful after a demo.
+- **`tools/unoq autostart`** makes the app start at power-up (set for `flicker-guard` on our board).
 
-**Which app and which link:** these are set in `.vscode/settings.json` (`unoq.app`, `unoq.host`),
-or with `UNOQ_APP` / `UNOQ_HOST` in the terminal. To use SSH over Wi-Fi instead of USB, set the
-host to `arduino@<board-name>.local`. eduroam often blocks device-to-device traffic; use USB there.
+**Which app and which link:** these are set in `.vscode/settings.json` (`unoq.app`, default
+`flicker-guard`; `unoq.host`), or with `UNOQ_APP` / `UNOQ_HOST` in the terminal. To use SSH over
+Wi-Fi instead of USB, set the host to `arduino@<board-name>.local`. eduroam often blocks
+device-to-device traffic; use USB there.
 
-## Reading the output
+## Reading the output (flicker-guard)
 
 ```
-15:13:18.192 PY  [stat] IMU 50/s |a| 1.00g ▇▂▄▇▇▃▅▆ │ LIGHT 36/s G 1500 red 29% ██▁▁██▁▁ swing 87% ~10.0Hz
+[stat]  36/s x18 G   6774 █▆▂▅█▅▁▅ swing  87% ~10.0Hz  rule: flicker · movement 4/s · monitoring
+[ei] flicker 0.97 ██████████ → ⚠ FLICKER (31 ms)
+[move] Seizure 0.02 (top: Standing) · Standing 0.97 · ... · watch 4:12 left (model 13.0 ms on the MCU)
+[alert] … / [watch] … / [led] …
 ```
 
-- **Rates (`/s`):** samples actually received per second. They should be about 50 (IMU) and 36 (light; nominally 40).
-  "no data" means a sensor is missing; check the Qwiic cable.
-- **Values:** `|a|` is total acceleration (about 1.00 g at rest). `G` is the light sensor's green
-  channel (roughly brightness). `red` is the red share of the light.
-- **Sparkline:** the last 2 seconds of each signal.
-- **`~10.0Hz`:** the strongest light-flicker frequency, shown only when it clearly stands out. It
-  covers about 1–18 Hz; faster flicker shows up at a wrong, lower frequency (the light sensor
-  takes about 36 readings a second, measured; see DI-01).
-- **`swing 87%`:** how much dimmer the dark phase is than the bright phase over the last 2 s.
-  - Steady light reads a few percent.
-  - Full on/off flashing reads 80–100%.
-  - Mains ripple and distant screens read low, so use this to set the alert threshold.
-  - `SAT` means the bright phase hit the top of the sensor's range: move or shade the sensor.
-- **Colours:**
-  - `[warn]` (yellow) means samples were missed or the Bridge is slow.
-  - `[rec]` (magenta) is recording status.
-  - Errors are red.
+- **`[stat]`, once a second:**
+  - light readings per second (~36), sensor gain, green level, a sparkline of the last ~1.8 s;
+  - `swing`: how much dimmer the dark phase is than the bright phase. Steady light reads a few
+    percent; full flashing 80–100%;
+  - `~10.0Hz`: the strongest flicker frequency, shown when it stands out. True up to about 15 Hz,
+    folded above (DI-01);
+  - `rule`: the rule-based baseline's verdict;
+  - movement samples per second (4);
+  - the phase: monitoring, exposure, or watch with the time left.
+- **`[ei]`, every 0.5 s:** the Edge Impulse flicker model's P(flicker). An alert needs ≥ 0.8 in 2 of
+  the last 3 windows.
+- **`[move]`, every 2.5 s:** the movement model's classes from the MCU.
+- **`[alert]` / `[watch]` / `[led]`:** state changes, also logged to `events.<time>.csv` and shown
+  on the LED matrix.
+- **Colours:** `[alert]` is red background, `[warn]` yellow, `[rec]` magenta; errors are red.
+
+**If `[stat]` shows `swing 1% steady` while the flicker page runs,** the flicker isn't reaching the
+Modulino Light: move it closer to the screen and dim the room.
 
 ## Recording data for Edge Impulse
 
-1. Start the app (Ctrl+Shift+B).
-2. Start a recording with the task **UNO Q: record…** or with `tools/unoq record <label> <seconds>`,
-   e.g. `tools/unoq record flicker_18hz 30`. Stop early with `tools/unoq record stop`.
-3. Copy the files to the laptop with `tools/unoq pull`. They land in `recordings/<app>/` as
-   `<label>.<time>.<stream>.csv`, one file per stream:
+`flicker-guard` records all the time, to `data/recordings/` on the board:
 
-   | Stream | Rate | Columns |
-   |---|---|---|
-   | `imu` | 50 Hz | timestamp (ms), accX/Y/Z (m/s²), gyrX/Y/Z (°/s) |
-   | `light` | ≤40 Hz | timestamp (ms), red, green, blue (raw counts) |
+| File | Rate | Columns |
+|---|---|---|
+| `flicker.<time>.csv` | ~36/s | t_ms, red, green, blue, gain_x |
+| `movement.<time>.csv` | 4/s | timestamp, accX/Y/Z (g), gyrX/Y/Z (°/s), same as the movement model's training data |
+| `events.<time>.csv` | on change | time, event, detail |
 
-4. In Edge Impulse Studio go to **Data acquisition → Upload data**. The CSV Wizard uses the
-   `timestamp` column, and the label is the part of the file name before the first dot.
-
-The streams have different rates, so give each model its own stream (light model: `light`;
-seizure model: `imu`), or resample before merging. `recordings/` is git-ignored; share datasets
-through Edge Impulse.
+Copy them with `tools/unoq pull` (→ `recordings/flicker-guard/`). Labelled flicker training data
+comes from `tools/flicker.html` → **Collect**, then `tools/ei/make_dataset.py`, `ei.py upload`,
+`ei.py train`, `ei.py deploy` (see `tools/ei/README.md`). `recordings/` is git-ignored; datasets
+live in Edge Impulse.
 
 ## Repo layout
 
-```
-apps/sensor-stream/        App Lab app: comms test + data recorder (copy it to start a new app)
-  app.yaml                 app manifest
-  python/main.py           Linux side: receives data, prints status, records CSVs
-  sketch/sketch.ino        MCU side: reads sensors, sends batches over the Bridge
-  sketch/sketch.yaml       sketch libraries (Arduino_Modulino 0.7.0, as in Arduino's own examples)
-apps/light-test/           automated test: how well does the Modulino Light read flicker? (LED sweep + screen sweep)
-apps/flicker-guard/        Edge Impulse flicker check on the board (runner brick, custom .eim) + training recorder
-tools/ei/                  Edge Impulse pipeline: Collect schedule, labelled windows, upload (train/deploy to do)
-hardware/light-test/       KiCad schematic + PDF + parts list for the light test rig
-tools/flicker.html         flicker test page: manual rates, automatic sweep (light-test), Collect (training data)
-tools/unoq                 command-line helper (adb or SSH)
-tools/pretty.py            timestamps, colours and log files for board output
-tools/stubs/               editor-only stubs for arduino.app_utils
-.vscode/                   tasks, settings, recommended extensions
-```
+See [README.md](../README.md#repo-layout).
 
 ## Hardware notes
 
 Checked against Arduino's docs and the library source code. The full list of problems, limits and
 decisions is in [DESIGN_ISSUES.md](DESIGN_ISSUES.md).
 
-- **Qwiic connector = `Wire1`**, not `Wire`. Call `Modulino.begin(Wire1)`.
+- **Qwiic connector = `Wire1`**, not `Wire`.
+- **Don't use the Arduino_Modulino library with board package 1.1.0:** sketches using it never start
+  on our board (DI-24). Read the Modulinos' registers instead; `apps/flicker-guard` has drivers for
+  the Light and the Movement.
 - **Modulino Light maxes out at 40 Hz:** the sensor needs at least 25 ms per reading. The library's
   `ModulinoLight::update()` also blocks for about 50–150 ms per call, which would stall everything
   else, so the sketches read the sensor's registers directly. Flicker frequency is read correctly
@@ -125,7 +117,10 @@ decisions is in [DESIGN_ISSUES.md](DESIGN_ISSUES.md).
 
 ## Status of this setup
 
-The sketch compiles for the UNO Q, and the Python side was dry-run on a laptop with simulated
-sensor data (rates, frequency detection and recording all worked). **It has not yet run on a
-real board,** so expect small fixes on the first run. Likely spots: file permissions on
-`data/`, and the exact log format of `arduino-app-cli`.
+Verified on our board (App Lab 0.7, laptop board package 1.1.0) as of v0.1 (2026-11-22):
+- push, laptop flashing, logs and pull;
+- Bridge messages both ways;
+- the brick runner with a custom model;
+- start at power-up.
+
+Known board quirks are in `docs/DESIGN_ISSUES.md` (DI-19, DI-20, DI-24).

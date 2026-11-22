@@ -9,14 +9,13 @@ laptop.
 | 2. Record | run `apps/flicker-guard`; open `tools/flicker.html` → **Collect (training data)**, ~7 min | done (1 session) |
 | 3. Pull | `UNOQ_APP=flicker-guard tools/unoq pull` → `recordings/flicker-guard/flicker.<time>.csv` | done |
 | 4. Label | `python3 tools/ei/make_dataset.py <csv>` → `dataset.<time>.json` | done |
-| 5. Upload | `python3 tools/ei/ei.py upload <dataset.json>` | done (510 windows) |
-| 6. Train | `python3 tools/ei/ei.py train` | **to do** (needs an Admin API key) |
-| 7. Deploy | `python3 tools/ei/ei.py deploy`, then copy the `.eim` to the board | **to do** |
+| 5. Upload | `python3 tools/ei/ei.py upload <dataset.json>` | done (509 windows) |
+| 6. Train | `python3 tools/ei/ei.py train [cycles]` (Admin key): impulse, spectral features, Keras, test-set evaluation | done: **97.0%** on 101 test windows (flicker 33/36, 3 uncertain; no_flicker 65/65) |
+| 7. Deploy | `python3 tools/ei/ei.py deploy` → `build/flicker-guard.eim`, then `adb push build/flicker-guard.eim /home/arduino/.arduino-bricks/ei-models/` and `UNOQ_APP=flicker-guard UNOQ_NO_SKETCH=1 tools/unoq restart` | done, running on the board (~30 ms per classification) |
 
-**API key:** read from `$EI_API_KEY` or `~/.config/flickerguard/ei-api-key`. Never commit it.
-- The current key's role is `ingestion_deployment`: it can upload data and build/download models,
-  but not edit the impulse or train.
-- Project: 1170128.
+**API keys:** read from `$EI_API_KEY`, else `~/.config/flickerguard/ei-admin-key` (Admin: needed to
+train), else `~/.config/flickerguard/ei-api-key` (`ingestion_deployment`: upload and deploy only).
+Never commit them. Project: 1170128.
 
 ## The Collect schedule (`collect_schedule.py`)
 
@@ -41,7 +40,7 @@ laptop.
   windows are never split between training and test.
 - **Tested** on a simulated session (60 Hz screen, pixel lag, 36 readings/s) and the real one.
 
-## Training settings to use (step 6)
+## Training settings (what `ei.py train` sets up)
 
 | Setting | Value |
 |---|---|

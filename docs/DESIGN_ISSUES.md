@@ -22,12 +22,13 @@ pitch and the Q&A. IDs are never reused; gaps are entries removed with DI-22.
 | [DI-12](#di-12-demo-safety-flashing-light-in-the-judging-room) | Demo safety: flashing light in the judging room | Demo | High | Rule |
 | [DI-13](#di-13-bridge-deadlock-rule) | Bridge deadlock rule | Firmware | Medium | Rule |
 | [DI-14](#di-14-eduroam-may-block-ssh-to-the-board) | eduroam may block SSH to the board | Tooling | Low | Mitigated |
-| [DI-15](#di-15-tooling-not-yet-run-on-real-hardware) | Tooling not yet run on real hardware | Tooling | Medium | Open |
+| [DI-15](#di-15-tooling-not-yet-run-on-real-hardware) | Tooling not yet run on real hardware | Tooling | Medium | Resolved |
 | [DI-18](#di-18-screens-short-flashes-and-viewing-distance) | Screens, short flashes and viewing distance | Sensing | Medium | Open |
 | [DI-19](#di-19-our-board-runs-app-lab-07--zephyr-core-052) | Our board runs App Lab 0.7 / Zephyr core 0.52 | Tooling | High | Mitigated |
 | [DI-20](#di-20-sketch-upload-to-the-mcu-fails) | Sketch upload to the MCU fails | Firmware | High | Mitigated |
 | [DI-22](#di-22-decision-the-modulino-light-is-the-only-light-sensor) | Decision: the Modulino Light is the only light sensor | Sensing | High | Resolved |
-| [DI-23](#di-23-running-the-edge-impulse-model-offline-on-the-uno-q) | Running the Edge Impulse model offline on the UNO Q | ML | High | Open |
+| [DI-23](#di-23-running-the-edge-impulse-models-offline-on-the-uno-q) | Running the Edge Impulse models offline on the UNO Q | ML | High | Mitigated |
+| [DI-24](#di-24-the-arduino_modulino-library-stops-sketches-starting-on-our-board) | The Arduino_Modulino library stops sketches starting on our board | Firmware | High | Mitigated |
 
 ---
 
@@ -139,12 +140,12 @@ correct around 10 Hz, folding above 20 Hz.
 the sensor between colour and ambient mode and waits for data with `delay(50)`. Every call blocks
 about 50–150 ms, which would stall the IMU sampling and limit light to about 10/s.
 
-**Decision.** The sketches (`sensor-stream`, `light-test`) don't call `update()`. They configure the
+**Decision.** The sketches (`flicker-guard`, `light-test`, and the archived `sensor-stream`) don't call `update()`. They configure the
 sensor once (continuous colour mode, 16-bit / 25 ms), check the data-ready bit without waiting, and
 read the colour registers directly. The register map was taken from the library source.
 
-**Check on hardware:** `sensor-stream`'s `[stat]` line should show `LIGHT ~36/s` (measured, DI-01). If readings
-saturate in bright light, lower the gain; if dim light reads near 0, raise it (register 0x05).
+**Checked on hardware:** `flicker-guard`'s `[stat]` line shows ~36 readings/s (DI-01). `flicker-guard`
+sets the gain automatically (register 0x05).
 
 ---
 
@@ -253,7 +254,8 @@ default; SSH is optional (`UNOQ_HOST`).
 ---
 
 ## DI-15 Tooling not yet run on real hardware
-**Status:** Open · **Severity:** Medium · **Logged:** 2026-11-21
+**Status:** Resolved (2026-11-22: `flicker-guard` runs, records to `data/` and is pulled with
+`tools/unoq pull`; `sensor-stream` itself never ran and is archived, see DI-24) · **Severity:** Medium · **Logged:** 2026-11-21
 
 The sketches compile for the UNO Q, and the Python sides passed laptop tests with simulated data.
 Still to confirm on the board with `sensor-stream`:
@@ -290,7 +292,7 @@ sensor at the end of a short black tube on the cap brim.
 
 **Next step.** Measure the brightness swing with the flicker page on a laptop and a TV at 0.5, 1,
 2 and 3 m, in a dim and a lit room, with and without the tube. The `swing NN%` value in
-`sensor-stream`'s `[stat]` line shows it directly. Set the alert threshold from that data.
+`flicker-guard`'s `[stat]` line shows it directly. Set the alert threshold from that data.
 
 ---
 
@@ -343,6 +345,11 @@ controller error-free; RDP 0; TrustZone off; no write protection.
 **Permanent fix:** update the board's software online (`arduino-app-cli system update`, needs the
 password and Wi-Fi), so App Lab builds with a package that matches the bootloader.
 
+**Update 2026-11-22: Python → MCU calls work too.** `Bridge.call("show", state, value)` from Python
+to a `Bridge.provide_safe` function in the sketch is confirmed (flicker-guard's LED matrix). One
+gotcha: calls fail with "method show not available" until the new sketch is flashed, so start
+Python before flashing and retry.
+
 ---
 
 ## DI-22 Decision: the Modulino Light is the only light sensor
@@ -362,8 +369,28 @@ and use the measured usable band in the pitch and the light model.
 
 ---
 
-## DI-23 Running the Edge Impulse model offline on the UNO Q
-**Status:** Open (training pending) · **Severity:** High · **Logged:** 2026-11-21
+## DI-23 Running the Edge Impulse models offline on the UNO Q
+**Status:** Mitigated (both models run on the board; live end-to-end test pending) · **Severity:** High · **Logged:** 2026-11-21
+
+**Update 2026-11-22.**
+- **Flicker model** (project 1170128):
+  - trained with `tools/ei/ei.py train` (Admin key);
+  - **97.0% on 101 held-out test windows**: flicker 33/36 (3 "uncertain"), no_flicker 65/65, int8
+    and float32 alike;
+  - deployed as a Linux aarch64 `.eim` through the brick runner; about 30 ms per classification on
+    the board.
+- **Movement model** ("Wearable Movement Monitoring (More Classes)", teammate project 1170305;
+  classes Running, Seizure, Sitting, Standing, Walking, Waving):
+  - runs **on the MCU** from its exported Arduino library (vendored in
+    `apps/flicker-guard/libraries/`);
+  - builds for core 1.1.0 (191 KB flash, 82 KB RAM; the first build takes about 8 min) and takes
+    **13 ms per classification**;
+  - input is identical to its training recipe (`MovementSensor.txt`): accX/Y/Z in g and gyrX/Y/Z in
+    °/s at 4 Hz, a 10 s window, classified every 2.5 s. 1.01 g at rest, checked.
+- **After-stimulus logic** in `apps/flicker-guard/python/main.py`: a flicker alert opens a 5 min
+  watch window; P(Seizure) ≥ 0.6 for 5 s starts a 15 s countdown to the carer alarm.
+- **Not yet done:** the live test with real flicker followed by acted shaking; the
+  wearer-cancel button; alarm hardware.
 
 **Decision: run the model on the Linux side, through an App Lab brick.**
 - The board is offline, so nothing can be downloaded or installed (`edge-impulse-linux` needs
@@ -410,6 +437,33 @@ and use the measured usable band in the pitch and the light model.
 
 **Next step:** train, deploy the `.eim`, then measure on the board: accuracy on the flicker page,
 false alerts in room light, and time from onset to alert (T4). Plan: `docs/BRIEF.md`.
+
+---
+
+## DI-24 The Arduino_Modulino library stops sketches starting on our board
+**Status:** Mitigated · **Severity:** High · **Logged:** 2026-11-22
+
+**Problem.** With `Arduino_Modulino` 0.7.0 (`Modulino.begin(Wire1)` + `ModulinoMovement`), a
+sketch built with board package 1.1.0 flashes fine but never sends anything, not even its first
+`Bridge.notify` from `setup()`. Bisected on the board:
+- the same sketch with the Edge Impulse library removed is still silent;
+- the previous sketch without the Modulino library runs (36 readings/s).
+
+The exact cause inside the library wasn't investigated. `sensor-stream` (now in `archive/`) uses
+this library too, so it probably has the same problem (DI-15).
+
+**Decision.** Read the Modulinos through their registers on `Wire1`, as already done for the
+Modulino Light (DI-02). For the Modulino Movement (LSM6DSOX at 0x6A), the settings and scaling are
+copied from `Arduino_LSM6DSOX`, which the Modulino library uses, so the data matches anything
+recorded through it:
+- CTRL2_G = 0x4C (gyro 104 Hz, 2000 °/s), CTRL1_XL = 0x4A (accel 104 Hz, ±4 g), CTRL7_G = 0x00,
+  CTRL8_XL = 0x09;
+- acceleration = raw × 4/32768 g, rotation = raw × 2000/32768 °/s.
+
+See `apps/flicker-guard/sketch/sketch.ino` (`imuBegin`, `imuRead`).
+
+**Next step.** If `sensor-stream` is ever needed again, port it to the same driver. For v0.1,
+`flicker-guard` does the recording.
 
 ---
 

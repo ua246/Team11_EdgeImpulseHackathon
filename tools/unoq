@@ -3,13 +3,13 @@
 #
 # Transport: adb over USB-C by default. To use SSH over Wi-Fi instead:
 #     export UNOQ_HOST=arduino@<board-name>.local
-# App: apps/$UNOQ_APP (default: sensor-stream), installed on the board as user:$UNOQ_APP.
+# App: apps/$UNOQ_APP (default: flicker-guard, the product), installed on the board as user:$UNOQ_APP.
 #
 # Run `tools/unoq help` for the command list.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="${UNOQ_APP:-sensor-stream}"
+APP="${UNOQ_APP:-flicker-guard}"
 HOST="${UNOQ_HOST:-}"
 REMOTE_APPS=/home/arduino/ArduinoApps
 FQBN=arduino:zephyr:unoq
@@ -104,7 +104,7 @@ for a in json.load(sys.stdin).get("apps", []):
     if a.get("status") not in ("running", "starting"):
         continue
     raw = a.get("id", "")
-    try:   # App Lab 0.7 lists IDs base64-encoded ("dXNlcjpzZW5zb3Itc3RyZWFt" = "user:sensor-stream")
+    try:   # App Lab 0.7 lists IDs base64-encoded ("dXNlcjpmbGlja2VyLWd1YXJk" = "user:flicker-guard")
         ident = base64.b64decode(raw + "=" * (-len(raw) % 4), validate=True).decode()
     except Exception:
         ident = raw
@@ -203,18 +203,39 @@ cmd_push() {
   # Replace the code folders so deleted files disappear; keep data/ (recordings) and .cache/.
   on_board "mkdir -p $dst && rm -rf $dst/python $dst/sketch"
   if [[ -n "$HOST" ]]; then
-    tar -C "$REPO/apps" --exclude='.cache' --exclude='data' --exclude='__pycache__' ${skip_sketch:+--exclude=sketch} -czf - "$APP" \
+    tar -C "$REPO/apps" --exclude='.cache' --exclude='data' --exclude='__pycache__' --exclude='models' ${skip_sketch:+--exclude=sketch --exclude=libraries} -czf - "$APP" \
       | ssh "${SSH_OPTS[@]}" "$HOST" "tar -C $REMOTE_APPS -xzf - --no-same-owner"
   else
     local item
     for item in "$src"/*; do
-      case "$(basename "$item")" in data|.cache|__pycache__) continue ;; esac
-      [[ -n "$skip_sketch" && "$(basename "$item")" == sketch ]] && continue
+      case "$(basename "$item")" in data|.cache|__pycache__|models) continue ;; esac   # models/: see below
+      [[ -n "$skip_sketch" && "$(basename "$item")" =~ ^(sketch|libraries)$ ]] && continue   # libraries/: sketch-only
       adb push "$item" "$dst/" >/dev/null
     done
     on_board "chown -R arduino:arduino $dst 2>/dev/null; true" || true
   fi
   ok "pushed"
+  install_model
+}
+
+# A pinned Edge Impulse model (apps/<app>/models/<app>.eim) goes where the app's brick runner reads it
+# (EI_MOTION_DETECTION_MODEL in app.yaml). Copied only when it differs, and swapped in by rename, so
+# a running runner keeps its old copy until the app restarts.
+install_model() {
+  local model="$REPO/apps/$APP/models/$APP.eim" dir=/home/arduino/.arduino-bricks/ei-models
+  [[ -f "$model" ]] || return 0
+  local mine theirs
+  mine=$(md5sum "$model" | cut -d' ' -f1)
+  theirs=$(on_board "md5sum $dir/$APP.eim 2>/dev/null | cut -d' ' -f1; true" | tr -d '\r')
+  if [[ "$mine" == "$theirs" ]]; then
+    hint "model $APP.eim on the board is up to date"
+    return 0
+  fi
+  on_board "mkdir -p $dir"
+  if [[ -n "$HOST" ]]; then scp -q "${SSH_OPTS[@]}" "$model" "$HOST:$dir/$APP.eim.new"
+  else adb push "$model" "$dir/$APP.eim.new" >/dev/null; fi
+  on_board "chmod 755 $dir/$APP.eim.new && mv -f $dir/$APP.eim.new $dir/$APP.eim"
+  ok "model installed: $dir/$APP.eim (restart the app to load it)"
 }
 
 # start | restart: flash the sketch from the laptop first when needed, then let App Lab run the app.
