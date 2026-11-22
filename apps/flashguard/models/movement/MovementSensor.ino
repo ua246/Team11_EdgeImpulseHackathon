@@ -2,9 +2,9 @@
 //
 // This is how the data for the "Wearable Movement Monitoring (More Classes)" Edge Impulse model
 // (project 1170305) was recorded: Modulino Movement at 4 Hz, printed over Serial as
-// accX,accY,accZ (g) and gyrX,gyrY,gyrZ (deg/s). flicker-guard's sketch reproduces exactly this input.
+// accX,accY,accZ (g) and gyrX,gyrY,gyrZ (deg/s). flashguard's sketch reproduces exactly this input.
 // Note: it uses the Arduino_Modulino library, which stops sketches starting on our UNO Q with board
-// package 1.1.0 (DI-24); to record more data on the UNO Q, use flicker-guard's movement.<time>.csv.
+// package 1.1.0 (DI-24); to record more data on the UNO Q, use flashguard's movement.<time>.csv.
 
 #include <Modulino.h>
 

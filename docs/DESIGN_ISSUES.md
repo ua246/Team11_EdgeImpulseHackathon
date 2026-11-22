@@ -140,11 +140,11 @@ correct around 10 Hz, folding above 20 Hz.
 the sensor between colour and ambient mode and waits for data with `delay(50)`. Every call blocks
 about 50–150 ms, which would stall the IMU sampling and limit light to about 10/s.
 
-**Decision.** The sketches (`flicker-guard`, `light-test`, and the archived `sensor-stream`) don't call `update()`. They configure the
+**Decision.** The sketches (`flashguard`, `light-test`, and the archived `sensor-stream`) don't call `update()`. They configure the
 sensor once (continuous colour mode, 16-bit / 25 ms), check the data-ready bit without waiting, and
 read the colour registers directly. The register map was taken from the library source.
 
-**Checked on hardware:** `flicker-guard`'s `[stat]` line shows ~36 readings/s (DI-01). `flicker-guard`
+**Checked on hardware:** `flashguard`'s `[stat]` line shows ~36 readings/s (DI-01). `flashguard`
 sets the gain automatically (register 0x05).
 
 ---
@@ -254,7 +254,7 @@ default; SSH is optional (`UNOQ_HOST`).
 ---
 
 ## DI-15 Tooling not yet run on real hardware
-**Status:** Resolved (2026-11-22: `flicker-guard` runs, records to `data/` and is pulled with
+**Status:** Resolved (2026-11-22: `flashguard` runs, records to `data/` and is pulled with
 `tools/unoq pull`; `sensor-stream` itself never ran and is archived, see DI-24) · **Severity:** Medium · **Logged:** 2026-11-21
 
 The sketches compile for the UNO Q, and the Python sides passed laptop tests with simulated data.
@@ -292,7 +292,7 @@ sensor at the end of a short black tube on the cap brim.
 
 **Next step.** Measure the brightness swing with the flicker page on a laptop and a TV at 0.5, 1,
 2 and 3 m, in a dim and a lit room, with and without the tube. The `swing NN%` value in
-`flicker-guard`'s `[stat]` line shows it directly. Set the alert threshold from that data.
+`flashguard`'s `[stat]` line shows it directly. Set the alert threshold from that data.
 
 ---
 
@@ -346,7 +346,7 @@ controller error-free; RDP 0; TrustZone off; no write protection.
 password and Wi-Fi), so App Lab builds with a package that matches the bootloader.
 
 **Update 2026-11-22: Python → MCU calls work too.** `Bridge.call("show", state, value)` from Python
-to a `Bridge.provide_safe` function in the sketch is confirmed (flicker-guard's LED matrix). One
+to a `Bridge.provide_safe` function in the sketch is confirmed (flashguard's LED matrix). One
 gotcha: calls fail with "method show not available" until the new sketch is flashed, so start
 Python before flashing and retry.
 
@@ -382,12 +382,12 @@ and use the measured usable band in the pitch and the light model.
 - **Movement model** ("Wearable Movement Monitoring (More Classes)", teammate project 1170305;
   classes Running, Seizure, Sitting, Standing, Walking, Waving):
   - runs **on the MCU** from its exported Arduino library (vendored in
-    `apps/flicker-guard/libraries/`);
+    `apps/flashguard/libraries/`);
   - builds for core 1.1.0 (191 KB flash, 82 KB RAM; the first build takes about 8 min) and takes
     **13 ms per classification**;
   - input is identical to its training recipe (`MovementSensor.txt`): accX/Y/Z in g and gyrX/Y/Z in
     °/s at 4 Hz, a 10 s window, classified every 2.5 s. 1.01 g at rest, checked.
-- **After-stimulus logic** in `apps/flicker-guard/python/main.py`: a flicker alert opens a 5 min
+- **After-stimulus logic** in `apps/flashguard/python/main.py`: a flicker alert opens a 5 min
   watch window; P(Seizure) ≥ 0.6 for 5 s starts a 15 s countdown to the carer alarm.
 - **Not yet done:** the live test with real flicker followed by acted shaking; the
   wearer-cancel button; alarm hardware.
@@ -402,20 +402,20 @@ and use the measured usable band in the pitch and the light model.
   bricks:
     - arduino:motion_detection:
         variables:
-          EI_MOTION_DETECTION_MODEL: /home/arduino/.arduino-bricks/ei-models/flicker-guard.eim
+          EI_MOTION_DETECTION_MODEL: /home/arduino/.arduino-bricks/ei-models/flashguard.eim
   ```
 - **Verified on the board:**
   - the runner loads a model from that path and serves it over HTTP on port 1337;
   - `MotionDetection(...).infer_from_features(list)` returns
     `{"result": {"classification": {label: 0..1}}}`;
-  - the brick's own `_extract_classification()` gives percentage *strings*, so `apps/flicker-guard`
+  - the brick's own `_extract_classification()` gives percentage *strings*, so `apps/flashguard`
     parses the raw result instead.
 - **Rejected for now: the MCU (Zephyr module).** Edge Impulse calls UNO Q support there
   "experimental"; it needs `west` and debugger flashing.
 - Edge Impulse lists a deployment target named **"Arduino UNO Q"** (`arduino-uno-q`), plus
   "Linux (AARCH64)" (`runner-linux-aarch64`).
 
-**Model input** (`apps/flicker-guard/python/features.py`, shared with the training tools):
+**Model input** (`apps/flashguard/python/features.py`, shared with the training tools):
 - **Window:** 64 readings (about 1.77 s at 36 readings/s).
 - **Preprocessing:** divide by the sensor gain, take the log (so brightness and distance become an
   offset), subtract the window mean.
@@ -460,10 +460,10 @@ recorded through it:
   CTRL8_XL = 0x09;
 - acceleration = raw × 4/32768 g, rotation = raw × 2000/32768 °/s.
 
-See `apps/flicker-guard/sketch/sketch.ino` (`imuBegin`, `imuRead`).
+See `apps/flashguard/sketch/sketch.ino` (`imuBegin`, `imuRead`).
 
 **Next step.** If `sensor-stream` is ever needed again, port it to the same driver. For v0.1,
-`flicker-guard` does the recording.
+`flashguard` does the recording.
 
 ---
 

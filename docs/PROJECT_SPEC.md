@@ -1,4 +1,4 @@
-# FlickerGuard: design spec and project outline
+# FlashGuard: design spec and project outline
 
 **Team 11** · CUES × Edge Impulse × Cambridge MedTech Foundation Hackathon · 21–22 Nov 2026
 **Status:** v0.2 draft (Modulino Light as the only light sensor), a living document. Code, tests and
@@ -249,7 +249,7 @@ Full log: `docs/DESIGN_ISSUES.md` on
 |---|---|
 | Modulino Light takes only about 36 readings/s (measured): frequencies above about 18 Hz read wrong, and part of the 16–25 Hz peak band folds; mains ripple folds to about 8.6 Hz (DI-01) | Accepted (DI-22). Measured band 1–15 Hz (T1) goes in the pitch; Model A is trained on the folded signal so it still alerts; a minimum brightness swing rejects mains ripple |
 | No real seizure data (DI-09) | Hard negatives, cancel button, honest framing, false-alarm measurement |
-| Two models in about 10 h | Model A is MVP; Model B is "Should"; fall back to light-only FlickerGuard (§15) |
+| Two models in about 10 h | Model A is MVP; Model B is "Should"; fall back to light-only FlashGuard (§15) |
 | Demo hardware failure | Strain relief, spare cables, backup video |
 
 ---
@@ -258,7 +258,7 @@ Full log: `docs/DESIGN_ISSUES.md` on
 
 | Fallback | What | When to switch |
 |---|---|---|
-| **FlickerGuard light-only** | Prevent loop only: Model A + vibration + log (+ servo eye shutter, F10). Same hardware | Model B isn't working by Sunday 10:00 |
+| **FlashGuard light-only** | Prevent loop only: Model A + vibration + log (+ servo eye shutter, F10). Same hardware | Model B isn't working by Sunday 10:00 |
 
 **Rejected:**
 - Two interleaved Modulino Lights for 80 readings/s: clock drift and too much effort (DI-01).
@@ -274,7 +274,7 @@ Full log: `docs/DESIGN_ISSUES.md` on
 
 ## 17. Submission draft (Devpost)
 
-> **FlickerGuard** is a wearable for people with photosensitive epilepsy, running two Edge Impulse
+> **FlashGuard** is a wearable for people with photosensitive epilepsy, running two Edge Impulse
 > models fully offline on an Arduino UNO Q. A cap-mounted light sensor recognises seizure-provoking
 > flicker in the real world and buzzes the wearer within about a second, prompting the advice to
 > cover one eye. A motion sensor on the arm then watches for a convulsive seizure.

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Team 11 · drive the FlickerGuard Edge Impulse project from the laptop (needs `requests`).
+"""Team 11 · drive the FlashGuard Edge Impulse project from the laptop (needs `requests`).
 
     python3 tools/ei/ei.py info                        project, data and impulse summary
     python3 tools/ei/ei.py upload <dataset.json>       labelled windows from make_dataset.py
     python3 tools/ei/ei.py train [cycles]              impulse + spectral features + Keras training + test accuracy
-    python3 tools/ei/ei.py deploy                      build the Linux aarch64 .eim → build/flicker-guard.eim
+    python3 tools/ei/ei.py deploy                      build the Linux aarch64 .eim → build/flashguard.eim
 
-The API key is read from $EI_API_KEY, else ~/.config/flickerguard/ei-admin-key (Admin role: needed to
-train), else ~/.config/flickerguard/ei-api-key (ingestion/deployment only). Keep keys out of git.
+The API key is read from $EI_API_KEY, else ~/.config/flashguard/ei-admin-key (Admin role: needed to
+train), else ~/.config/flashguard/ei-api-key (ingestion/deployment only). Keep keys out of git.
 """
 
 import json
@@ -22,7 +22,7 @@ import requests
 STUDIO = "https://studio.edgeimpulse.com/v1/api"
 INGEST = "https://ingestion.edgeimpulse.com/api"
 REPO = Path(__file__).resolve().parent.parent.parent
-MODEL_OUT = REPO / "build" / "flicker-guard.eim"
+MODEL_OUT = REPO / "build" / "flashguard.eim"
 
 
 def api_key():
@@ -30,10 +30,10 @@ def api_key():
     if key:
         return key
     for name in ("ei-admin-key", "ei-api-key"):
-        f = Path.home() / ".config" / "flickerguard" / name
+        f = Path.home() / ".config" / "flashguard" / name
         if f.exists():
             return f.read_text().strip()
-    sys.exit("No API key: set EI_API_KEY or save it to ~/.config/flickerguard/ei-admin-key")
+    sys.exit("No API key: set EI_API_KEY or save it to ~/.config/flashguard/ei-admin-key")
 
 
 KEY = None
@@ -87,7 +87,7 @@ def acquisition_json(sample, interval_ms, axes):
         "protected": {"ver": "v1", "alg": "none", "iat": int(time.time())},
         "signature": "0" * 64,
         "payload": {
-            "device_name": "uno-q-flicker-guard",
+            "device_name": "uno-q-flashguard",
             "device_type": "ARDUINO_UNO_Q",
             "interval_ms": interval_ms,
             "sensors": [{"name": a, "units": "N/A"} for a in axes],
@@ -135,7 +135,7 @@ def cmd_upload(path, limit=None):
 
 # ---- train ------------------------------------------------------------------------------------------
 
-# Must match apps/flicker-guard/python/features.py: 64 readings at 27.6 ms. 1766.4 ms would round down
+# Must match apps/flashguard/python/features.py: 64 readings at 27.6 ms. 1766.4 ms would round down
 # to 63 readings, so the window is 1767 ms.
 IMPULSE = {
     "inputBlocks": [{"id": 1, "type": "time-series", "name": "Time series", "title": "Time series data",
@@ -195,7 +195,7 @@ def cmd_deploy(fmt="runner-linux-aarch64"):
     r = requests.get(f"{STUDIO}/{pid}/deployment/download", headers=H, params={"type": fmt}, timeout=300)
     r.raise_for_status()
     MODEL_OUT.parent.mkdir(exist_ok=True)
-    out = MODEL_OUT if fmt == "runner-linux-aarch64" else MODEL_OUT.with_name(f"flicker-guard.{fmt}.eim")
+    out = MODEL_OUT if fmt == "runner-linux-aarch64" else MODEL_OUT.with_name(f"flashguard.{fmt}.eim")
     out.write_bytes(r.content)
     out.chmod(0o755)
     print(f"downloaded {out} ({len(r.content) / 1e6:.1f} MB)")

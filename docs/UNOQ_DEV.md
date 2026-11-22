@@ -34,19 +34,19 @@ Run tasks with **Ctrl+Shift+P → Tasks: Run Task**.
 
 - **Sketches are built on the laptop and flashed over USB** (board package 1.1.0; the board's own
   App Lab can't flash, DI-20). `start`, `restart` and `dev` do it automatically. A first build of
-  `flicker-guard` takes ~8 min (Edge Impulse SDK); later builds take ~1 min.
+  `flashguard` takes ~8 min (Edge Impulse SDK); later builds take ~1 min.
 - **`UNOQ_NO_SKETCH=1 tools/unoq restart`** restarts only Python and the model runner.
 - **`tools/unoq push` also installs a pinned model** (`apps/<app>/models/<app>.eim`) when it changed.
 - **Compile errors become clickable entries in the Problems panel.**
 - **Every output stream is also saved to `logs/`,** which is useful after a demo.
-- **`tools/unoq autostart`** makes the app start at power-up (set for `flicker-guard` on our board).
+- **`tools/unoq autostart`** makes the app start at power-up (set for `flashguard` on our board).
 
 **Which app and which link:** these are set in `.vscode/settings.json` (`unoq.app`, default
-`flicker-guard`; `unoq.host`), or with `UNOQ_APP` / `UNOQ_HOST` in the terminal. To use SSH over
+`flashguard`; `unoq.host`), or with `UNOQ_APP` / `UNOQ_HOST` in the terminal. To use SSH over
 Wi-Fi instead of USB, set the host to `arduino@<board-name>.local`. eduroam often blocks
 device-to-device traffic; use USB there.
 
-## Reading the output (flicker-guard)
+## Reading the output (flashguard)
 
 ```
 [stat]  36/s x18 G   6774 █▆▂▅█▅▁▅ swing  87% ~10.0Hz  rule: flicker · movement 4/s · monitoring
@@ -76,7 +76,7 @@ Modulino Light: move it closer to the screen and dim the room.
 
 ## Recording data for Edge Impulse
 
-`flicker-guard` records all the time, to `data/recordings/` on the board:
+`flashguard` records all the time, to `data/recordings/` on the board:
 
 | File | Rate | Columns |
 |---|---|---|
@@ -84,7 +84,7 @@ Modulino Light: move it closer to the screen and dim the room.
 | `movement.<time>.csv` | 4/s | timestamp, accX/Y/Z (g), gyrX/Y/Z (°/s), same as the movement model's training data |
 | `events.<time>.csv` | on change | time, event, detail |
 
-Copy them with `tools/unoq pull` (→ `recordings/flicker-guard/`). Labelled flicker training data
+Copy them with `tools/unoq pull` (→ `recordings/flashguard/`). Labelled flicker training data
 comes from `tools/flicker.html` → **Collect**, then `tools/ei/make_dataset.py`, `ei.py upload`,
 `ei.py train`, `ei.py deploy` (see `tools/ei/README.md`). `recordings/` is git-ignored; datasets
 live in Edge Impulse.
@@ -100,7 +100,7 @@ decisions is in [DESIGN_ISSUES.md](DESIGN_ISSUES.md).
 
 - **Qwiic connector = `Wire1`**, not `Wire`.
 - **Don't use the Arduino_Modulino library with board package 1.1.0:** sketches using it never start
-  on our board (DI-24). Read the Modulinos' registers instead; `apps/flicker-guard` has drivers for
+  on our board (DI-24). Read the Modulinos' registers instead; `apps/flashguard` has drivers for
   the Light and the Movement.
 - **Modulino Light maxes out at 40 Hz:** the sensor needs at least 25 ms per reading. The library's
   `ModulinoLight::update()` also blocks for about 50–150 ms per call, which would stall everything

@@ -1,6 +1,6 @@
-# Flicker Guard
+# FlashGuard
 
-FlickerGuard's on-board system: **two Edge Impulse models on the UNO Q, fully offline.**
+FlashGuard's on-board system: **two Edge Impulse models on the UNO Q, fully offline.**
 
 | Model | Runs on | Input | Output |
 |---|---|---|---|
@@ -8,9 +8,9 @@ FlickerGuard's on-board system: **two Edge Impulse models on the UNO Q, fully of
 | **Movement** (response), "Wearable Movement Monitoring (More Classes)", project 1170305 | MCU (STM32U585), exported Arduino library in `libraries/` | Modulino Movement accX/Y/Z (g) + gyrX/Y/Z (°/s) at 4 Hz, 40 samples (10 s), every 2.5 s | Running, **Seizure**, Sitting, Standing, Walking, Waving |
 
 ```sh
-tools/unoq dev        # flicker-guard is the default app: builds + flashes the sketch from the laptop (DI-20),
+tools/unoq dev        # flashguard is the default app: builds + flashes the sketch from the laptop (DI-20),
                       # starts Python + model runner, shows the output. First build ~8 min (Edge Impulse SDK)
-tools/unoq push       # copies the Python side and installs models/flicker-guard.eim when it changed
+tools/unoq push       # copies the Python side and installs models/flashguard.eim when it changed
 UNOQ_NO_SKETCH=1 tools/unoq restart    # restart Python + model runner only (needed after a model change)
 tools/unoq autostart  # start at power-up, no laptop needed (set on our board)
 ```
@@ -96,7 +96,7 @@ library is needed.
     Impulse SDK, about 8 min.
 - **Python:**
   - asks the runner to classify each light window: the `.eim` model at
-    `/home/arduino/.arduino-bricks/ei-models/flicker-guard.eim`, about 30 ms per call measured on the
+    `/home/arduino/.arduino-bricks/ei-models/flashguard.eim`, about 30 ms per call measured on the
     board;
   - runs the state machine above;
   - logs events.

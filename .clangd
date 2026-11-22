@@ -16,6 +16,6 @@ CompileFlags:
   CompilationDatabase: build/light-test
 ---
 If:
-  PathMatch: apps/flicker-guard/.*
+  PathMatch: apps/flashguard/.*
 CompileFlags:
-  CompilationDatabase: build/flicker-guard
+  CompilationDatabase: build/flashguard

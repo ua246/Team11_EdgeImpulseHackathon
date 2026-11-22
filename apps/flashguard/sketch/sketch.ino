@@ -1,4 +1,4 @@
-// Team 11 · flicker-guard · MCU side
+// Team 11 · flashguard · MCU side
 //
 // 1. Streams every Modulino Light reading (R, G, B and the gain it was taken at) to Python, which
 //    records it and runs the Edge Impulse *flicker* model on it (python/main.py, Linux side).
@@ -261,7 +261,7 @@ void setup() {
   lightOk = lightBegin();
   moveOk = imuBegin();
   lastMoveUs = micros();
-  info(String("[mcu] flicker-guard booted. Modulino Light: ") + (lightOk ? "OK" : "MISSING (Qwiic cable?)") +
+  info(String("[mcu] flashguard booted. Modulino Light: ") + (lightOk ? "OK" : "MISSING (Qwiic cable?)") +
        ", Modulino Movement: " + (moveOk ? "OK" : "MISSING") + ". Movement model: " + EI_CLASSIFIER_PROJECT_NAME +
        " (" + EI_CLASSIFIER_LABEL_COUNT + " classes, " + EI_CLASSIFIER_FREQUENCY + " Hz, " +
        (EI_CLASSIFIER_RAW_SAMPLE_COUNT / EI_CLASSIFIER_FREQUENCY) + " s window)");

@@ -1,4 +1,4 @@
-"""Team 11 · flicker-guard · Linux side of the UNO Q.
+"""Team 11 · flashguard · Linux side of the UNO Q.
 
 Two Edge Impulse models, both on the board and offline:
   * FLICKER (stimulus), here on Linux: every STEP_S seconds the last features.WINDOW Modulino Light
@@ -428,7 +428,7 @@ def loop():
     time.sleep(0.02)
 
 
-print(f"[boot] flicker-guard · {model_note}", flush=True)
+print(f"[boot] flashguard · {model_note}", flush=True)
 print(f"[boot] movement model on the MCU · seizure watch {WATCH_S // 60} min after a flicker exposure "
       f"(P≥{SEIZURE_P_WATCH} x{SEIZURE_N_WATCH}); otherwise "
       + ("off" if MOVEMENT_ONLY_AFTER_STIMULUS else f"P≥{SEIZURE_P_ALWAYS} x{SEIZURE_N_ALWAYS}"), flush=True)

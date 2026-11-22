@@ -1,4 +1,4 @@
-"""Team 11 · flicker-guard · model input, shared by the board (main.py) and the laptop tools (tools/ei).
+"""Team 11 · flashguard · model input, shared by the board (main.py) and the laptop tools (tools/ei).
 
 The Edge Impulse model sees one window of WINDOW Modulino Light readings (R, G, B). The same
 preprocessing must be used for training and on the device, so it lives here only:

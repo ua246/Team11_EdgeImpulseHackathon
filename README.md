@@ -1,4 +1,4 @@
-# FlickerGuard (Team 11)
+# FlashGuard (Team 11)
 
 A wearable for people with photosensitive epilepsy, built on the Arduino UNO Q with two Edge Impulse
 models running on the board, offline:
@@ -17,10 +17,10 @@ The state shows on the board's LED matrix.
    `tools/unoq doctor`.
 2. Open this folder in VSCodium and accept the recommended extensions.
 3. Press **Ctrl+Shift+B**, or run `tools/unoq dev`. This builds the sketch on the laptop, flashes it,
-   starts `apps/flicker-guard`, and shows the output.
+   starts `apps/flashguard`, and shows the output.
    - The first build takes ~8 min (Edge Impulse SDK); later builds take ~1 min.
 4. Live test: open `tools/flicker.html`, show 10 Hz to the Modulino Light (dim room, 2–5 cm), then
-   shake the Modulino Movement. See [apps/flicker-guard](apps/flicker-guard/README.md).
+   shake the Modulino Movement. See [apps/flashguard](apps/flashguard/README.md).
 
 Full board workflow: [docs/UNOQ_DEV.md](docs/UNOQ_DEV.md).
 
@@ -28,7 +28,7 @@ Full board workflow: [docs/UNOQ_DEV.md](docs/UNOQ_DEV.md).
 
 ```
 apps/
-  flicker-guard/        THE PRODUCT (App Lab app)
+  flashguard/           THE PRODUCT (App Lab app)
     python/             Linux side: flicker model, after-stimulus logic, LED control, logging
     sketch/             MCU side: sensors, movement model, LED matrix
     models/             pinned models + model cards (flicker .eim, movement recipe)

@@ -1,6 +1,10 @@
-# FlickerGuard v0.1: first working model
+# FlashGuard v0.1: first working model
 
 **Tag `v0.1`** · Sun 22 Nov 2026 · Team 11, CUES × Edge Impulse × Cambridge MedTech hackathon
+
+(v0.1 was tagged under the working name *FlickerGuard*: the tag message and the files at that tag use
+the old name and the app folder `apps/flicker-guard`. The project was renamed **FlashGuard** later
+the same day.)
 
 The first version where the whole chain runs on the Arduino UNO Q, offline:
 **flicker detection (Edge Impulse) → watch window → seizure-like movement (Edge Impulse) → carer
@@ -10,12 +14,12 @@ alarm**, with the state shown on the board's LED matrix.
 
 | Part | Where | Status |
 |---|---|---|
-| Flicker model | Linux side, brick runner, `apps/flicker-guard/models/flicker-guard.eim` | 97.0% on 101 held-out test windows, no false alarms; ~30 ms per check on the board |
-| Movement model (teammate's, project 1170305) | MCU, Arduino library in `apps/flicker-guard/libraries/` | Runs every 2.5 s, ~13 ms; input checked (1.01 g at rest) |
-| After-stimulus logic | `apps/flicker-guard/python/main.py` | Flicker alert → 5 min watch window → P(Seizure) ≥ 0.6 for 5 s → 15 s countdown → carer alarm; tested in simulation |
-| LED matrix | `apps/flicker-guard/sketch/sketch.ino` | Static icons: eye, warning triangle, eye + time bar, countdown, SOS. Self-test passes on the board |
+| Flicker model | Linux side, brick runner, `apps/flashguard/models/flashguard.eim` | 97.0% on 101 held-out test windows, no false alarms; ~30 ms per check on the board |
+| Movement model (teammate's, project 1170305) | MCU, Arduino library in `apps/flashguard/libraries/` | Runs every 2.5 s, ~13 ms; input checked (1.01 g at rest) |
+| After-stimulus logic | `apps/flashguard/python/main.py` | Flicker alert → 5 min watch window → P(Seizure) ≥ 0.6 for 5 s → 15 s countdown → carer alarm; tested in simulation |
+| LED matrix | `apps/flashguard/sketch/sketch.ino` | Static icons: eye, warning triangle, eye + time bar, countdown, SOS. Self-test passes on the board |
 | Logging | `data/recordings/` on the board | Light, movement and events (exposure, alarm) as CSV |
-| Starts at power-up | App Lab default app | Flicker Guard comes up by itself about 2 min after power-on, no laptop needed |
+| Starts at power-up | App Lab default app | FlashGuard comes up by itself about 2 min after power-on, no laptop needed |
 | Sensor characterisation | `apps/light-test`, `hardware/light-test` | Screen sweep PASS: 10 Hz read correctly, correct band 1–15 Hz, sensor takes ~36 readings/s |
 | Training pipeline | `tools/flicker.html` (Collect), `tools/ei/` | Record → label → upload → train → deploy, scripted |
 
@@ -28,9 +32,9 @@ alarm**, with the state shown on the board's LED matrix.
 
 ```sh
 tools/unoq doctor                 # board on USB
-tools/unoq dev                    # push + flash + watch (flicker-guard is the default app)
+tools/unoq dev                    # push + flash + watch (flashguard is the default app)
 tools/unoq push                   # also installs the pinned flicker model when it changed
-tools/unoq autostart              # start Flicker Guard at power-up (already set on our board)
+tools/unoq autostart              # start FlashGuard at power-up (already set on our board)
 ```
 
 Live test:
@@ -53,5 +57,5 @@ Live test:
 ## Repo at this version
 
 See the layout in [`README.md`](../README.md). `archive/` holds apps that are not part of v0.1:
-- `sensor-stream`, replaced by Flicker Guard's own recording, and affected by DI-24;
+- `sensor-stream`, replaced by FlashGuard's own recording, and affected by DI-24;
 - the MAX30102 heart-rate experiment (DI-22).

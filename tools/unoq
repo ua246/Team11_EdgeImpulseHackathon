@@ -3,13 +3,13 @@
 #
 # Transport: adb over USB-C by default. To use SSH over Wi-Fi instead:
 #     export UNOQ_HOST=arduino@<board-name>.local
-# App: apps/$UNOQ_APP (default: flicker-guard, the product), installed on the board as user:$UNOQ_APP.
+# App: apps/$UNOQ_APP (default: flashguard, the product), installed on the board as user:$UNOQ_APP.
 #
 # Run `tools/unoq help` for the command list.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="${UNOQ_APP:-flicker-guard}"
+APP="${UNOQ_APP:-flashguard}"
 HOST="${UNOQ_HOST:-}"
 REMOTE_APPS=/home/arduino/ArduinoApps
 FQBN=arduino:zephyr:unoq
@@ -104,7 +104,7 @@ for a in json.load(sys.stdin).get("apps", []):
     if a.get("status") not in ("running", "starting"):
         continue
     raw = a.get("id", "")
-    try:   # App Lab 0.7 lists IDs base64-encoded ("dXNlcjpmbGlja2VyLWd1YXJk" = "user:flicker-guard")
+    try:   # App Lab 0.7 lists IDs base64-encoded ("dXNlcjpmbGlja2VyLWd1YXJk" = "user:flashguard")
         ident = base64.b64decode(raw + "=" * (-len(raw) % 4), validate=True).decode()
     except Exception:
         ident = raw
@@ -134,6 +134,7 @@ ${B}unoq${X}: talk to the Arduino UNO Q   (app: ${B}$APP${X}, link: ${B}$(link_n
   ${B}ps${X} / ${B}list${X}           running apps / all apps on the board
   ${B}shell${X}               open a shell on the board
   ${B}autostart${X} [none]    start this app automatically at boot (none = turn off)
+  ${B}migrate-app${X} <old>   move an app renamed in the repo to its new name on the board (keeps data/)
   ${B}record${X} <label> [s]  record labelled CSVs for Edge Impulse (default 10 s; label 'stop' stops)
   ${B}pull${X}                copy recordings to recordings/$APP/
   ${B}compile${X}             compile the sketch on this laptop (fast error check, also feeds clangd)
@@ -260,6 +261,23 @@ start_app() {
 cmd_start()   { start_app start; }
 cmd_restart() { start_app restart; }
 
+# One-off: an app renamed in the repo (e.g. flicker-guard → flashguard) is moved on the board too,
+# keeping its data/ (recordings), its model file and the start-at-power-up setting.
+cmd_migrate_app() {
+  need_board
+  local old="${1:-}" new="$APP" dir=/home/arduino/.arduino-bricks/ei-models
+  [[ -n "$old" ]] || die "usage: UNOQ_APP=<new name> tools/unoq migrate-app <old name>"
+  on_board "test -d $REMOTE_APPS/$old" || die "no app '$old' on the board"
+  on_board "test ! -e $REMOTE_APPS/$new" || die "'$new' already exists on the board"
+  on_board "arduino-app-cli app stop $REMOTE_APPS/$old >/dev/null 2>&1; true"
+  on_board "mv $REMOTE_APPS/$old $REMOTE_APPS/$new"
+  on_board "test -f $dir/$old.eim && mv -f $dir/$old.eim $dir/$new.eim; true"
+  local def
+  def=$(on_board "arduino-app-cli properties get default 2>/dev/null; true" | tr -d '\r')
+  if [[ "$def" == *"$old"* ]]; then on_board "arduino-app-cli properties set default $REMOTE_APPS/$new"; fi
+  ok "moved $old → $new on the board (data kept). Next: tools/unoq push && tools/unoq start"
+}
+
 cmd_flash() {
   local cli sk="$REPO/apps/$APP/sketch" port out rc=0
   cli=$(find_cli) || die "arduino-cli not found; set ARDUINO_CLI=/path/to/arduino-cli"
@@ -358,6 +376,7 @@ case "$cmd" in
   help|-h|--help) cmd_help ;;
   doctor|push|start|stop|restart|ps|list|shell|logs|monitor|dev|pull|compile|flash) "cmd_$cmd" ;;
   autostart) cmd_autostart "$@" ;;
+  migrate-app) cmd_migrate_app "$@" ;;
   record) cmd_record "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

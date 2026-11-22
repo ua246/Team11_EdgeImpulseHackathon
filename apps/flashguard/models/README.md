@@ -1,13 +1,13 @@
-# Models in FlickerGuard v0.1
+# Models in FlashGuard v0.1
 
 Both models are pinned here, so v0.1 can be rebuilt exactly as it ran.
 
-## Flicker model (stimulus): `flicker-guard.eim`
+## Flicker model (stimulus): `flashguard.eim`
 
 | | |
 |---|---|
-| Edge Impulse project | 1170128 (`loadingwear-project-1`), deployment v1 |
-| File | `flicker-guard.eim`: Linux aarch64 (`runner-linux-aarch64`), 13.8 MB, md5 `fdcff01a0dea321718621068b1fb2c2f`. Identical to the copy that ran on the board on 2026-11-22 |
+| Edge Impulse project | 1170128, **FlashGuard** (named `loadingwear-project-1` when this model was built; the runner still reports that name) |
+| File | `flashguard.eim`: Linux aarch64 (`runner-linux-aarch64`), 13.8 MB, md5 `fdcff01a0dea321718621068b1fb2c2f`. Identical to the copy that ran on the board on 2026-11-22. A re-export after the rename (same trained model, new binary, reports "FlashGuard") hasn't been checked on the board yet, so this file stays pinned |
 | Runs on | UNO Q Linux side, through the `arduino:motion_detection` brick's runner (`app.yaml`) |
 | Input | 64 Modulino Light readings × R, G, B (~1.77 s at ~36/s), preprocessed by `python/features.py`: ÷ gain, log, minus the window mean |
 | Impulse | Time series 1767 ms / 36.23 Hz → Spectral Analysis (FFT 64, no filter, log spectrum) → Keras classifier |

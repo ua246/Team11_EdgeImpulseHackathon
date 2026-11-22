@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Team 11 · cut a flicker-guard recording made with tools/flicker.html → "Collect" into labelled
+"""Team 11 · cut a flashguard recording made with tools/flicker.html → "Collect" into labelled
 windows for Edge Impulse.
 
-    UNOQ_APP=flicker-guard tools/unoq pull
-    python3 tools/ei/make_dataset.py recordings/flicker-guard/flicker.<time>.csv
-        → recordings/flicker-guard/dataset.<time>.json  (then tools/ei/ei.py upload <that file>)
+    UNOQ_APP=flashguard tools/unoq pull
+    python3 tools/ei/make_dataset.py recordings/flashguard/flicker.<time>.csv
+        → recordings/flashguard/dataset.<time>.json  (then tools/ei/ei.py upload <that file>)
     python3 tools/ei/make_dataset.py --check <csv>   exit 0 once the recording holds a complete session
 
 Each window is features.WINDOW readings (~1.77 s), preprocessed exactly as on the board
-(apps/flicker-guard/python/features.py), taken every STRIDE readings inside each labelled segment
+(apps/flashguard/python/features.py), taken every STRIDE readings inside each labelled segment
 (the edges are trimmed). Whole segments are held out for testing (every 5th segment of the schedule,
 and the last 20% of the room-light minute), so overlapping windows never sit on both sides.
 """
@@ -21,7 +21,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent.parent / "apps" / "flicker-guard" / "python"))
+sys.path.insert(0, str(HERE.parent.parent / "apps" / "flashguard" / "python"))
 import collect_schedule as cs  # noqa: E402
 import features as ft  # noqa: E402
 

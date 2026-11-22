@@ -1,4 +1,4 @@
-# FlickerGuard: status after day 1, plan for day 2
+# FlashGuard: status after day 1, plan for day 2
 
 **Team 11** · written Sat 21 Nov 2026, evening · Devpost deadline **Sun 12:00**, judges 13:00.
 Full design: [PROJECT_SPEC.md](PROJECT_SPEC.md) · decisions and problems:
@@ -6,7 +6,7 @@ Full design: [PROJECT_SPEC.md](PROJECT_SPEC.md) · decisions and problems:
 
 ## Update: Sun 22 Nov, morning
 
-**Both Edge Impulse models now run on the UNO Q, offline** (`apps/flicker-guard`, DI-23):
+**Both Edge Impulse models now run on the UNO Q, offline** (`apps/flashguard`, DI-23):
 
 | | Flicker model (stimulus) | Movement model (response) |
 |---|---|---|
@@ -37,9 +37,9 @@ Vibro/Buzzer output are open.
 
 **Saved as v0.1, the first working model** (git tag `v0.1`, [RELEASE_v0.1.md](RELEASE_v0.1.md)).
 The repo is now organised around it:
-- `apps/flicker-guard` is the product, with its models pinned in `models/`;
+- `apps/flashguard` is the product, with its models pinned in `models/`;
 - `sensor-stream` and the MAX30102 app moved to `archive/`;
-- `tools/unoq` and VSCodium default to `flicker-guard`, and `tools/unoq push` installs the pinned model.
+- `tools/unoq` and VSCodium default to `flashguard`, and `tools/unoq push` installs the pinned model.
 
 ## In one paragraph
 
@@ -68,7 +68,7 @@ trained model**:
 ### Apps (`apps/`)
 | App | Purpose | State |
 |---|---|---|
-| `flicker-guard` | **The product.** Streams Modulino Light readings with auto gain, runs the Edge Impulse model every 0.5 s (P(flicker) ≥ 0.8 in 2 of 3 windows → alert), prints a rule-based baseline, records training data | Verified on the board except inference with a real flicker model (none trained yet; a placeholder model sits at the model path) |
+| `flashguard` | **The product.** Streams Modulino Light readings with auto gain, runs the Edge Impulse model every 0.5 s (P(flicker) ≥ 0.8 in 2 of 3 windows → alert), prints a rule-based baseline, records training data | Verified on the board except inference with a real flicker model (none trained yet; a placeholder model sits at the model path) |
 | `light-test` | Characterises the Modulino Light: LED-rig sweep (automatic) or screen sweep (`tools/flicker.html` → Sweep, analysed by `screen_sweep.py`), with PASS/PARTIAL/FAIL verdicts | Screen sweep **PASS**; LED rig not built yet |
 | `sensor-stream` (now `archive/`) | Streams Modulino Light + Movement; labelled CSV recording for Edge Impulse (`tools/unoq record`) | Compiles; **not yet run on the board** (DI-15). The starting point for the motion model |
 | `max30102-heart-rate` (now `archive/`) | A teammate's standalone heart-rate app | Outside the current design (DI-22); kept as is |
@@ -102,7 +102,7 @@ trained model**:
 
 **1. Train and deploy the flicker model. MVP, about 1–1.5 h.**
 - Get an **Admin** API key (Studio → Dashboard → Keys → Add new, role Admin) and save it to
-  `~/.config/flickerguard/ei-api-key`.
+  `~/.config/flashguard/ei-api-key`.
 - Write `ei.py train`, or click through Studio with the settings in `tools/ei/README.md`:
   - time-series window 1767 ms, 36.23 Hz;
   - Spectral Analysis on R/G/B, FFT 64, log on;
@@ -111,8 +111,8 @@ trained model**:
   Check the test accuracy. Delete the one duplicate window.
 - Write `ei.py deploy`: build the **"Arduino UNO Q"** (`arduino-uno-q`) or `runner-linux-aarch64`
   target, download the `.eim`, then
-  `adb push … /home/arduino/.arduino-bricks/ei-models/flicker-guard.eim` and
-  `UNOQ_APP=flicker-guard UNOQ_NO_SKETCH=1 tools/unoq restart`.
+  `adb push … /home/arduino/.arduino-bricks/ei-models/flashguard.eim` and
+  `UNOQ_APP=flashguard UNOQ_NO_SKETCH=1 tools/unoq restart`.
   - Check that the model's `input_features_count` is 192.
 - **Live test:**
   - flicker page at 5, 10 and 15 Hz → alert;
@@ -138,11 +138,11 @@ trained model**:
 - A backup video. Devpost text (spec §17), and update the spec's open items.
 
 **5. Stretch: seizure-like motion (model B).**
-- (Superseded: the teammate's movement model now runs in flicker-guard.) Run `sensor-stream` on the board, record acted shaking against normal activities (2 people), and
+- (Superseded: the teammate's movement model now runs in flashguard.) Run `sensor-stream` on the board, record acted shaking against normal activities (2 people), and
   train a second model.
 - **Open question:** whether two brick runners can run at once. The fallback is a rule on the motion
   energy.
-- Only start this if 1–4 are done by about 10:00. Otherwise the pitch is "FlickerGuard light-only"
+- Only start this if 1–4 are done by about 10:00. Otherwise the pitch is "FlashGuard light-only"
   (spec §15).
 
 **Optional:** build the LED rig and run `apps/light-test` (T1 with a real LED), for a cleaner sensor
@@ -152,19 +152,19 @@ characterisation than the screen.
 
 ```sh
 adb devices                                         # board on USB; Linux needs ~1 min after power-on
-UNOQ_APP=flicker-guard tools/unoq dev               # flashes the sketch, starts the runner, shows output
+UNOQ_APP=flashguard tools/unoq dev               # flashes the sketch, starts the runner, shows output
 python3 -m venv .venv && .venv/bin/pip install numpy requests   # laptop tools
 .venv/bin/python tools/ei/ei.py info                # project 1170128: data and impulse summary
 ```
 
 **Not in git (on purpose):**
 - Recordings live in `recordings/` on the laptop that took them. The raw session is
-  `flicker-guard/flicker.20251210-195010.csv`; the board's clock is unsynced, hence the date.
+  `flashguard/flicker.20251210-195010.csv`; the board's clock is unsynced, hence the date.
 - The training windows are in the Edge Impulse project.
-- The API key lives in `~/.config/flickerguard/`.
+- The API key lives in `~/.config/flashguard/`.
 
 **Board state:**
-- `flicker-guard` is installed, with the placeholder model.
+- `flashguard` is installed, with the placeholder model.
 - The `arduino` user's password has never been set (DI-19); it's only needed for sudo/SSH/updates.
 
 ## Risks for tomorrow
